@@ -1,0 +1,162 @@
+import Testing
+import Foundation
+import SwiftData
+@testable import Clippy
+
+@MainActor
+struct StoreTests {
+    let store: ClipStore
+    let blobs: BlobStore
+    let container: ModelContainer
+
+    init() throws {
+        let schema = Schema([ClipItem.self, Snippet.self])
+        container = try ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, isStoredInMemoryOnly: true))
+        let dir = FileManager.default.temporaryDirectory.appending(path: "ClippyTests-\(UUID().uuidString)")
+        blobs = BlobStore(directory: dir)
+        store = ClipStore(context: container.mainContext, blobs: blobs)
+    }
+
+    // MARK: Dedupe
+
+    @Test func copyingSameTextTwiceKeepsOneItemAndMovesItToTop() {
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        store.ingest(.text("hello"), now: t0)
+        store.ingest(.text("world"), now: t0.addingTimeInterval(1))
+        store.ingest(.text("hello"), now: t0.addingTimeInterval(2))
+
+        let items = store.allItems()
+        #expect(items.count == 2)
+        #expect(items.first?.text == "hello")
+        #expect(items.first?.copyCount == 2)
+    }
+
+    @Test func richAndPlainVersionsOfSameTextDedupe() {
+        store.ingest(.text("same"))
+        store.ingest(.text("same", rtf: Data("{\\rtf1 same}".utf8)))
+        let items = store.allItems()
+        #expect(items.count == 1)
+        #expect(items.first?.kind == .richText)
+    }
+
+    @Test func differentTextIsNotDeduped() {
+        store.ingest(.text("a"))
+        store.ingest(.text("a "))
+        #expect(store.count() == 2)
+    }
+
+    @Test func dedupeUpdatesSourceApp() {
+        store.ingest(.text("x", source: AppRef(bundleID: "com.a", name: "A")))
+        store.ingest(.text("x", source: AppRef(bundleID: "com.b", name: "B")))
+        #expect(store.allItems().first?.sourceBundleID == "com.b")
+    }
+
+    @Test func duplicateImageCaptureRemovesRedundantBlobs() throws {
+        func capture(_ file: String) throws -> ProcessedCapture {
+            try blobs.write(Data([1, 2, 3]), name: file)
+            return ProcessedCapture(kind: .image, text: "", preview: "Image", fileURLs: [], hash: "image:abc",
+                                    imageFile: file, thumbnailFile: nil)
+        }
+        store.ingest(try capture("first.png"))
+        store.ingest(try capture("second.png"))
+        #expect(store.count() == 1)
+        #expect(blobs.allFileNames() == ["first.png"])
+    }
+
+    // MARK: Retention
+
+    @Test func retentionTrimsToMaxItemsKeepingNewest() {
+        let base = Date(timeIntervalSince1970: 10_000)
+        for i in 0..<10 {
+            store.ingest(.text("item \(i)"), now: base.addingTimeInterval(Double(i)))
+        }
+        store.enforceRetention(maxItems: 3, maxAge: nil, now: base.addingTimeInterval(100))
+        #expect(store.allItems().map(\.text) == ["item 9", "item 8", "item 7"])
+    }
+
+    @Test func retentionRemovesItemsOlderThanMaxAge() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        store.ingest(.text("old"), now: now.addingTimeInterval(-40 * 86_400))
+        store.ingest(.text("new"), now: now.addingTimeInterval(-1 * 86_400))
+        store.enforceRetention(maxItems: 500, maxAge: 30 * 86_400, now: now)
+        #expect(store.allItems().map(\.text) == ["new"])
+    }
+
+    @Test func pinnedItemsAreExemptFromRetention() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let pinned = store.ingest(.text("pinned & ancient"), now: now.addingTimeInterval(-400 * 86_400))
+        store.togglePin(pinned)
+        for i in 0..<5 { store.ingest(.text("n\(i)"), now: now.addingTimeInterval(Double(-i))) }
+
+        store.enforceRetention(maxItems: 2, maxAge: 30 * 86_400, now: now)
+
+        let texts = Set(store.allItems().map(\.text))
+        #expect(texts == ["pinned & ancient", "n0", "n1"])
+    }
+
+    @Test func retentionDeletesImageBlobs() throws {
+        try blobs.write(Data([0]), name: "img.png")
+        try blobs.write(Data([0]), name: "img-thumb.png")
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        store.ingest(ProcessedCapture(kind: .image, text: "", preview: "Image", fileURLs: [], hash: "image:1",
+                                      imageFile: "img.png", thumbnailFile: "img-thumb.png"),
+                     now: now.addingTimeInterval(-90 * 86_400))
+        store.enforceRetention(maxItems: 500, maxAge: 30 * 86_400, now: now)
+        #expect(store.count() == 0)
+        #expect(blobs.allFileNames().isEmpty)
+    }
+
+    @Test func clearHistoryKeepsPinned() {
+        let a = store.ingest(.text("a"))
+        store.ingest(.text("b"))
+        store.togglePin(a)
+        store.clearHistory()
+        #expect(store.allItems().map(\.text) == ["a"])
+    }
+
+    @Test func replaceTextUpdatesHashAndMergesDuplicates() {
+        let a = store.ingest(.text("draft"))
+        store.ingest(.text("final"))
+        store.replaceText(of: a, with: "final")
+        #expect(store.count() == 1)
+        #expect(store.allItems().first?.id == a.id)
+    }
+}
+
+struct IgnoreRuleTests {
+    let ignored: Set<String> = ["com.1password.1password", "com.apple.Passwords"]
+
+    @Test(arguments: [
+        ClipboardFilter.concealedType,
+        ClipboardFilter.transientType,
+        ClipboardFilter.autoGeneratedType,
+    ])
+    func blockedPasteboardTypesAreNeverCaptured(type: String) {
+        let decision = ClipboardFilter.decide(types: ["public.utf8-plain-text", type], sourceBundleID: "com.apple.Safari", ignoredBundleIDs: ignored)
+        #expect(decision == .blockedType)
+    }
+
+    @Test func ignoredAppsAreSkipped() {
+        let decision = ClipboardFilter.decide(types: ["public.utf8-plain-text"], sourceBundleID: "com.1password.1password", ignoredBundleIDs: ignored)
+        #expect(decision == .ignoredApp)
+    }
+
+    @Test func ownWritesAreSkipped() {
+        let decision = ClipboardFilter.decide(types: ["public.utf8-plain-text", ClipboardFilter.internalMarkerType], sourceBundleID: nil, ignoredBundleIDs: ignored)
+        #expect(decision == .ownWrite)
+    }
+
+    @Test func normalCopiesAreCaptured() {
+        let decision = ClipboardFilter.decide(types: ["public.utf8-plain-text"], sourceBundleID: "com.apple.Safari", ignoredBundleIDs: ignored)
+        #expect(decision == .capture)
+    }
+
+    @Test func emptyPasteboardIsSkipped() {
+        #expect(ClipboardFilter.decide(types: [], sourceBundleID: nil, ignoredBundleIDs: []) == .empty)
+    }
+
+    @Test func defaultIgnoreListContainsPasswordManagers() {
+        let ids = Set(AppRef.defaultIgnored.map(\.bundleID))
+        #expect(ids.isSuperset(of: ["com.1password.1password", "com.bitwarden.desktop", "com.apple.keychainaccess", "com.apple.Passwords"]))
+    }
+}

@@ -1,0 +1,165 @@
+import AppKit
+import Security
+import LocalAuthentication
+import Observation
+
+nonisolated struct SecretRef: Identifiable, Hashable, Sendable {
+    let id: String          // keychain account (UUID)
+    var name: String
+    var createdAt: Date?
+}
+
+/// Secret values live only in the login keychain (one generic-password item each). Names are
+/// stored as the item label so listing never needs to touch the values.
+nonisolated enum SecretVault {
+    static let service = (Bundle.main.bundleIdentifier ?? "at.softmaze.Clippy") + ".secrets"
+
+    static func list() -> [SecretRef] {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecReturnAttributes: true,
+            kSecMatchLimit: kSecMatchLimitAll,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let items = result as? [[String: Any]]
+        else { return [] }
+        return items.compactMap { attrs in
+            guard let account = attrs[kSecAttrAccount as String] as? String else { return nil }
+            return SecretRef(
+                id: account,
+                name: attrs[kSecAttrLabel as String] as? String ?? "Untitled",
+                createdAt: attrs[kSecAttrCreationDate as String] as? Date
+            )
+        }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    @discardableResult
+    static func add(name: String, value: String) -> SecretRef? {
+        let id = UUID().uuidString
+        let attributes: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: id,
+            kSecAttrLabel: name,
+            kSecAttrDescription: "Clippy secret",
+            kSecValueData: Data(value.utf8),
+        ]
+        guard SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess else { return nil }
+        return SecretRef(id: id, name: name, createdAt: .now)
+    }
+
+    @discardableResult
+    static func update(id: String, name: String? = nil, value: String? = nil) -> Bool {
+        var changes: [CFString: Any] = [:]
+        if let name { changes[kSecAttrLabel] = name }
+        if let value { changes[kSecValueData] = Data(value.utf8) }
+        guard !changes.isEmpty else { return true }
+        return SecItemUpdate(baseQuery(id) as CFDictionary, changes as CFDictionary) == errSecSuccess
+    }
+
+    static func value(id: String) -> String? {
+        var query = baseQuery(id)
+        query[kSecReturnData] = true
+        query[kSecMatchLimit] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data
+        else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func delete(id: String) {
+        SecItemDelete(baseQuery(id) as CFDictionary)
+    }
+
+    private static func baseQuery(_ id: String) -> [CFString: Any] {
+        [kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: id]
+    }
+}
+
+/// Lists secrets, gates access behind Touch ID / password, and pastes them so that no
+/// clipboard manager (including Clippy) records them.
+@Observable
+final class SecretStore {
+    private(set) var secrets: [SecretRef] = []
+    private(set) var revision = 0
+    @ObservationIgnored private var lastAuthentication: Date?
+    @ObservationIgnored private var observers: [NSObjectProtocol] = []
+    @ObservationIgnored private let prefs: Preferences
+
+    init(prefs: Preferences) {
+        self.prefs = prefs
+        reload()
+        // Forget the unlock window whenever the Mac sleeps or locks.
+        let lock: @Sendable (Notification) -> Void = { [weak self] _ in
+            MainActor.assumeIsolated { self?.lastAuthentication = nil }
+        }
+        let workspace = NSWorkspace.shared.notificationCenter
+        observers.append(workspace.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main, using: lock))
+        observers.append(workspace.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main, using: lock))
+        observers.append(DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: .main, using: lock))
+    }
+
+    func reload() {
+        secrets = SecretVault.list()
+        revision &+= 1
+    }
+
+    @discardableResult
+    func add(name: String, value: String) -> SecretRef? {
+        let ref = SecretVault.add(name: name, value: value)
+        reload()
+        return ref
+    }
+
+    func rename(_ ref: SecretRef, to name: String) {
+        SecretVault.update(id: ref.id, name: name)
+        reload()
+    }
+
+    func setValue(_ value: String, for ref: SecretRef) {
+        SecretVault.update(id: ref.id, value: value)
+    }
+
+    func delete(_ ref: SecretRef) {
+        SecretVault.delete(id: ref.id)
+        reload()
+    }
+
+    var isUnlocked: Bool {
+        guard prefs.secretGraceMinutes > 0, let lastAuthentication else { return false }
+        return Date.now.timeIntervalSince(lastAuthentication) < TimeInterval(prefs.secretGraceMinutes * 60)
+    }
+
+    func lock() {
+        lastAuthentication = nil
+    }
+
+    /// Touch ID (or the login password) unless still inside the unlock window.
+    func authenticate(reason: String) async -> Bool {
+        if isUnlocked { return true }
+        let context = LAContext()
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
+            Log.app.error("Authentication unavailable: \(error?.localizedDescription ?? "unknown", privacy: .public)")
+            return false
+        }
+        do {
+            try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
+            lastAuthentication = .now
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Unlocks and returns the value, or nil if the user cancelled.
+    func reveal(_ ref: SecretRef, reason: String) async -> String? {
+        guard await authenticate(reason: reason) else { return nil }
+        return SecretVault.value(id: ref.id)
+    }
+}

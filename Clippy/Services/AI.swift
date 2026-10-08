@@ -1,0 +1,681 @@
+import Foundation
+import Security
+import Observation
+
+// MARK: - Keychain
+
+/// API keys live only in the login keychain, never in UserDefaults or files.
+nonisolated enum Keychain {
+    static let service = (Bundle.main.bundleIdentifier ?? "at.softmaze.Clippy") + ".anthropic"
+
+    static func read(account: String) -> String? {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+            kSecReturnData: true,
+            kSecMatchLimit: kSecMatchLimitOne,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data,
+              let value = String(data: data, encoding: .utf8),
+              !value.isEmpty
+        else { return nil }
+        return value
+    }
+
+    @discardableResult
+    static func save(_ value: String, account: String, label: String) -> Bool {
+        delete(account: account)
+        let attributes: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+            kSecAttrLabel: label,
+            kSecValueData: Data(value.utf8),
+        ]
+        return SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess
+    }
+
+    static func delete(account: String) {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}
+
+// MARK: - Providers
+
+nonisolated enum AIProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
+    case anthropic
+    case openAI
+    case deepSeek
+    case openRouter
+    case custom
+    case claudeCode
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .anthropic: "Anthropic (Claude API)"
+        case .openAI: "OpenAI"
+        case .deepSeek: "DeepSeek"
+        case .openRouter: "OpenRouter"
+        case .custom: "OpenAI-Compatible (Custom)"
+        case .claudeCode: "Claude Code (Subscription)"
+        }
+    }
+
+    var shortName: String {
+        switch self {
+        case .anthropic, .claudeCode: "Claude"
+        case .openAI: "OpenAI"
+        case .deepSeek: "DeepSeek"
+        case .openRouter: "OpenRouter"
+        case .custom: "AI"
+        }
+    }
+
+    var defaultBaseURL: String {
+        switch self {
+        case .anthropic: "https://api.anthropic.com/v1"
+        case .openAI: "https://api.openai.com/v1"
+        case .deepSeek: "https://api.deepseek.com"
+        case .openRouter: "https://openrouter.ai/api/v1"
+        case .custom: "http://localhost:11434/v1"
+        case .claudeCode: ""
+        }
+    }
+
+    var defaultModel: String {
+        switch self {
+        case .anthropic: "claude-sonnet-5-5"
+        case .openAI: "gpt-5.6"
+        case .deepSeek: "deepseek-flash"
+        case .openRouter: "openrouter/auto"
+        case .custom: ""
+        case .claudeCode: "sonnet"
+        }
+    }
+
+    /// Custom endpoints (Ollama, LM Studio, …) often run without a key.
+    var requiresAPIKey: Bool {
+        switch self {
+        case .anthropic, .openAI, .deepSeek, .openRouter: true
+        case .custom, .claudeCode: false
+        }
+    }
+
+    var usesAPIKey: Bool { self != .claudeCode }
+    var hasEditableBaseURL: Bool { self == .custom }
+
+    var keychainAccount: String {
+        self == .anthropic ? "api-key" : "api-key-\(rawValue)"
+    }
+
+    var keyPlaceholder: String {
+        switch self {
+        case .anthropic: "sk-ant-…"
+        case .openAI, .deepSeek: "sk-…"
+        case .openRouter: "sk-or-…"
+        case .custom: "Optional"
+        case .claudeCode: ""
+        }
+    }
+
+    var apiKey: String? { Keychain.read(account: keychainAccount) }
+}
+
+// MARK: - Actions
+
+nonisolated enum AIAction: Hashable, Identifiable, Sendable {
+    case translate(language: String)
+    case summarize
+    case fixGrammar
+    case explain
+    case custom(CustomPrompt)
+
+    static let builtIn: [AIAction] = [
+        .translate(language: "English"),
+        .translate(language: "German"),
+        .translate(language: "Farsi"),
+        .summarize,
+        .fixGrammar,
+        .explain,
+    ]
+
+    var id: String {
+        switch self {
+        case .translate(let language): "translate-\(language)"
+        case .summarize: "summarize"
+        case .fixGrammar: "fixGrammar"
+        case .explain: "explain"
+        case .custom(let prompt): "custom-\(prompt.id.uuidString)"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .translate(let language): "Translate to \(language)"
+        case .summarize: "Summarize"
+        case .fixGrammar: "Fix Grammar"
+        case .explain: "Explain"
+        case .custom(let prompt): prompt.name.isEmpty ? "Custom Prompt" : prompt.name
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .translate: "character.bubble"
+        case .summarize: "text.line.first.and.arrowtriangle.forward"
+        case .fixGrammar: "checkmark.seal"
+        case .explain: "questionmark.bubble"
+        case .custom: "sparkles"
+        }
+    }
+
+    var systemPrompt: String {
+        let suffix = "The input is the text inside the <text> tags. Reply with the result only — no preamble, quotes or commentary."
+        switch self {
+        case .translate(let language):
+            return "Translate the input into \(language). Preserve meaning, tone, formatting and line breaks. \(suffix)"
+        case .summarize:
+            return "Summarize the input concisely in the same language as the input. \(suffix)"
+        case .fixGrammar:
+            return "Correct grammar, spelling and punctuation in the input. Keep its language, meaning, tone and formatting unchanged otherwise. \(suffix)"
+        case .explain:
+            return "Explain the input clearly and concisely for a smart reader. If it is code, explain what it does. Answer in the language of the input unless it is code. The input is the text inside the <text> tags."
+        case .custom(let prompt):
+            return "\(prompt.prompt)\n\n\(suffix)"
+        }
+    }
+
+    static func userMessage(for input: String) -> String {
+        "<text>\n\(input)\n</text>"
+    }
+}
+
+// MARK: - Errors & SSE
+
+nonisolated enum AIError: LocalizedError, Equatable {
+    case missingAPIKey(AIProviderKind)
+    case missingModel
+    case badURL
+    case http(status: Int, message: String)
+    case api(String)
+    case refusal
+    case invalidResponse
+    case cliNotFound
+
+    var errorDescription: String? {
+        switch self {
+        case .missingAPIKey(let provider): "Add your \(provider.shortName) API key in Settings → AI."
+        case .missingModel: "Choose a model in Settings → AI."
+        case .badURL: "The base URL in Settings → AI isn't valid."
+        case .http(let status, let message): "Request failed (\(status)): \(message)"
+        case .api(let message): message
+        case .refusal: "The model declined this request."
+        case .invalidResponse: "Unexpected response from the API."
+        case .cliNotFound: "Couldn't find the `claude` command. Install Claude Code and run `claude` once to sign in."
+        }
+    }
+
+    var needsSettings: Bool {
+        switch self {
+        case .missingAPIKey, .missingModel, .badURL, .cliNotFound: true
+        default: false
+        }
+    }
+}
+
+nonisolated enum SSEEvent: Equatable, Sendable {
+    case textDelta(String)
+    case stop(reason: String?)
+    case error(String)
+    case done
+    case other
+}
+
+nonisolated enum SSEParser {
+    private static func json(_ line: String) -> [String: Any]? {
+        guard line.hasPrefix("data:") else { return nil }
+        let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+        guard let data = payload.data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    /// Anthropic Messages API stream (`content_block_delta`, `message_delta`, `error`).
+    static func parse(line: String) -> SSEEvent? {
+        guard let json = json(line), let type = json["type"] as? String else { return nil }
+        switch type {
+        case "content_block_delta":
+            if let delta = json["delta"] as? [String: Any],
+               delta["type"] as? String == "text_delta",
+               let text = delta["text"] as? String {
+                return .textDelta(text)
+            }
+            return .other
+        case "message_delta":
+            let delta = json["delta"] as? [String: Any]
+            return .stop(reason: delta?["stop_reason"] as? String)
+        case "error":
+            let error = json["error"] as? [String: Any]
+            return .error(error?["message"] as? String ?? "Unknown API error")
+        default:
+            return .other
+        }
+    }
+
+    /// OpenAI-style Chat Completions stream (`choices[].delta.content`, `[DONE]`).
+    static func parseOpenAI(line: String) -> SSEEvent? {
+        guard line.hasPrefix("data:") else { return nil }
+        if line.dropFirst(5).trimmingCharacters(in: .whitespaces) == "[DONE]" { return .done }
+        guard let json = json(line) else { return nil }
+        if let error = json["error"] as? [String: Any] {
+            return .error(error["message"] as? String ?? "Unknown API error")
+        }
+        guard let choice = (json["choices"] as? [[String: Any]])?.first else { return .other }
+        if let delta = choice["delta"] as? [String: Any], let text = delta["content"] as? String, !text.isEmpty {
+            return .textDelta(text)
+        }
+        if let reason = choice["finish_reason"] as? String {
+            return .stop(reason: reason)
+        }
+        return .other
+    }
+
+    static func errorMessage(fromBody data: Data) -> String {
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let error = json["error"] as? [String: Any], let message = error["message"] as? String { return message }
+            if let message = json["error"] as? String { return message }
+            if let message = json["message"] as? String { return message }
+        }
+        return String(data: data.prefix(500), encoding: .utf8) ?? "No details"
+    }
+}
+
+// MARK: - Clients
+
+nonisolated protocol AIStreamingClient: Sendable {
+    func stream(system: String, user: String) -> AsyncThrowingStream<String, Error>
+}
+
+nonisolated enum HTTPStreaming {
+    /// Runs a streaming request and feeds each line to `handle`, which yields text or throws.
+    static func stream(
+        _ request: @escaping @Sendable () throws -> URLRequest,
+        session: URLSession,
+        handle: @escaping @Sendable (String, AsyncThrowingStream<String, Error>.Continuation) throws -> Bool
+    ) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let (bytes, response) = try await session.bytes(for: try request())
+                    guard let http = response as? HTTPURLResponse else { throw AIError.invalidResponse }
+                    guard (200..<300).contains(http.statusCode) else {
+                        var body = Data()
+                        for try await byte in bytes {
+                            body.append(byte)
+                            if body.count > 65_536 { break }
+                        }
+                        throw AIError.http(status: http.statusCode, message: SSEParser.errorMessage(fromBody: body))
+                    }
+                    for try await line in bytes.lines {
+                        if try handle(line, continuation) == false { break }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+}
+
+nonisolated struct ClaudeClient: AIStreamingClient {
+    var apiKey: String
+    var model: String
+    var session: URLSession = .shared
+
+    static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")
+    static let fallbackBeta = "server-side-fallback-2026-07-01"
+    /// Models that accept server-side refusal fallbacks with `fallbacks: "default"`.
+    static let fallbackModels: Set<String> = ["claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5", "claude-fable-5-1"]
+    /// Model families that accept `output_config.effort`.
+    static let effortPrefixes = ["claude-fable-5", "claude-mythos-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-5",
+                                 "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8", "claude-sonnet-4-6"]
+
+    func makeRequest(system: String, user: String, maxTokens: Int = 8_192) throws -> URLRequest {
+        guard let endpoint = Self.endpoint else { throw AIError.badURL }
+        var body: [String: Any] = [
+            "model": model,
+            "max_tokens": maxTokens,
+            "stream": true,
+            "system": system,
+            "messages": [["role": "user", "content": user]],
+        ]
+        if Self.effortPrefixes.contains(where: model.hasPrefix) {
+            body["output_config"] = ["effort": "low"]
+        }
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        if Self.fallbackModels.contains(model) {
+            body["fallbacks"] = "default"
+            request.setValue(Self.fallbackBeta, forHTTPHeaderField: "anthropic-beta")
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return request
+    }
+
+    func stream(system: String, user: String) -> AsyncThrowingStream<String, Error> {
+        HTTPStreaming.stream({ try makeRequest(system: system, user: user) }, session: session) { line, continuation in
+            switch SSEParser.parse(line: line) {
+            case .textDelta(let text): continuation.yield(text)
+            case .stop(let reason) where reason == "refusal": throw AIError.refusal
+            case .error(let message): throw AIError.api(message)
+            default: break
+            }
+            return true
+        }
+    }
+}
+
+/// OpenAI Chat Completions format — also spoken by DeepSeek, OpenRouter, Ollama, LM Studio, Groq, …
+nonisolated struct OpenAICompatibleClient: AIStreamingClient {
+    var baseURL: String
+    var apiKey: String?
+    var model: String
+    var extraHeaders: [String: String] = [:]
+    var session: URLSession = .shared
+
+    func makeRequest(system: String, user: String) throws -> URLRequest {
+        let trimmed = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        guard let url = URL(string: trimmed + "/chat/completions"), url.scheme?.hasPrefix("http") == true else {
+            throw AIError.badURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        if let apiKey, !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "authorization")
+        }
+        for (key, value) in extraHeaders { request.setValue(value, forHTTPHeaderField: key) }
+        let body: [String: Any] = [
+            "model": model,
+            "stream": true,
+            "messages": [
+                ["role": "system", "content": system],
+                ["role": "user", "content": user],
+            ],
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return request
+    }
+
+    func stream(system: String, user: String) -> AsyncThrowingStream<String, Error> {
+        HTTPStreaming.stream({ try makeRequest(system: system, user: user) }, session: session) { line, continuation in
+            switch SSEParser.parseOpenAI(line: line) {
+            case .textDelta(let text): continuation.yield(text)
+            case .stop(let reason) where reason == "content_filter": throw AIError.refusal
+            case .error(let message): throw AIError.api(message)
+            case .done: return false
+            default: break
+            }
+            return true
+        }
+    }
+}
+
+/// Uses the locally installed Claude Code CLI (`claude -p`), which runs on the user's own
+/// Claude subscription login. Slower to start than the API, but no API key or API billing.
+nonisolated struct ClaudeCodeCLIClient: AIStreamingClient {
+    var model: String
+
+    static let candidatePaths = [
+        "~/.local/bin/claude", "~/.claude/local/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude",
+    ].map { NSString(string: $0).expandingTildeInPath }
+
+    static var executableURL: URL? {
+        candidatePaths.first { FileManager.default.isExecutableFile(atPath: $0) }.map(URL.init(fileURLWithPath:))
+    }
+
+    func arguments(system: String) -> [String] {
+        var args = [
+            "-p",
+            "--system-prompt", system,
+            "--tools", "",
+            "--strict-mcp-config",
+            "--disable-slash-commands",
+            "--no-session-persistence",
+            "--output-format", "stream-json",
+            "--include-partial-messages",
+            "--verbose",
+        ]
+        if !model.isEmpty { args += ["--model", model] }
+        return args
+    }
+
+    /// Parses one stream-json line. Returns text to yield, or throws for errors.
+    enum LineEvent: Equatable { case delta(String), message(String), result(isError: Bool, text: String), other }
+
+    static func parse(line: String) -> LineEvent {
+        guard let data = line.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["type"] as? String
+        else { return .other }
+        switch type {
+        case "stream_event":
+            if let event = json["event"] as? [String: Any],
+               event["type"] as? String == "content_block_delta",
+               let delta = event["delta"] as? [String: Any],
+               delta["type"] as? String == "text_delta",
+               let text = delta["text"] as? String {
+                return .delta(text)
+            }
+            return .other
+        case "assistant":
+            let content = (json["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []
+            let text = content.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined()
+            return text.isEmpty ? .other : .message(text)
+        case "result":
+            return .result(isError: json["is_error"] as? Bool ?? false, text: json["result"] as? String ?? "")
+        default:
+            return .other
+        }
+    }
+
+    func stream(system: String, user: String) -> AsyncThrowingStream<String, Error> {
+        let arguments = arguments(system: system)
+        return AsyncThrowingStream { continuation in
+            guard let executable = Self.executableURL else {
+                continuation.finish(throwing: AIError.cliNotFound)
+                return
+            }
+            let process = ProcessBox()
+            let task = Task {
+                do {
+                    let (stdout, stdin) = try process.launch(executable: executable, arguments: arguments)
+                    stdin.write(Data(user.utf8))
+                    try? stdin.close()
+                    var streamed = false
+                    var buffered = ""
+                    for try await line in stdout.bytes.lines {
+                        switch Self.parse(line: line) {
+                        case .delta(let text):
+                            streamed = true
+                            continuation.yield(text)
+                        case .message(let text):
+                            buffered += text
+                        case .result(let isError, let text):
+                            if isError { throw AIError.api(text.isEmpty ? "Claude Code reported an error." : text) }
+                            if !streamed { continuation.yield(buffered.isEmpty ? text : buffered) }
+                        case .other:
+                            break
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
+                process.terminate()
+            }
+        }
+    }
+}
+
+/// `Process` isn't Sendable; all access is serialised through this box.
+nonisolated final class ProcessBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: Process?
+
+    func launch(executable: URL, arguments: [String]) throws -> (stdout: FileHandle, stdin: FileHandle) {
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+        // An empty working directory keeps project CLAUDE.md files out of the prompt.
+        let workdir = FileManager.default.temporaryDirectory.appending(path: "clippy-cli", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: workdir, withIntermediateDirectories: true)
+        process.currentDirectoryURL = workdir
+        let out = Pipe(), input = Pipe()
+        process.standardOutput = out
+        process.standardInput = input
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        lock.withLock { self.process = process }
+        return (out.fileHandleForReading, input.fileHandleForWriting)
+    }
+
+    func terminate() {
+        lock.withLock {
+            if process?.isRunning == true { process?.terminate() }
+        }
+    }
+}
+
+nonisolated enum AIClientFactory {
+    static func make(provider: AIProviderKind, model: String, customBaseURL: String) throws -> any AIStreamingClient {
+        let model = model.trimmingCharacters(in: .whitespaces)
+        if provider != .claudeCode, model.isEmpty { throw AIError.missingModel }
+        let key = provider.apiKey
+        if provider.requiresAPIKey, key == nil { throw AIError.missingAPIKey(provider) }
+
+        switch provider {
+        case .anthropic:
+            return ClaudeClient(apiKey: key ?? "", model: model)
+        case .openAI, .deepSeek:
+            return OpenAICompatibleClient(baseURL: provider.defaultBaseURL, apiKey: key, model: model)
+        case .openRouter:
+            return OpenAICompatibleClient(baseURL: provider.defaultBaseURL, apiKey: key, model: model,
+                                          extraHeaders: ["X-Title": "Clippy"])
+        case .custom:
+            return OpenAICompatibleClient(baseURL: customBaseURL, apiKey: key, model: model)
+        case .claudeCode:
+            return ClaudeCodeCLIClient(model: model)
+        }
+    }
+}
+
+/// Lists models from the provider's `/models` endpoint so IDs never go stale in the app.
+nonisolated enum AIModelLister {
+    static func fetch(provider: AIProviderKind, customBaseURL: String) async throws -> [String] {
+        if provider == .claudeCode { return ["sonnet", "opus", "haiku"] }
+        let base = (provider == .custom ? customBaseURL : provider.defaultBaseURL)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        guard let url = URL(string: base + "/models") else { throw AIError.badURL }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 20
+        let key = provider.apiKey
+        if provider.requiresAPIKey, key == nil { throw AIError.missingAPIKey(provider) }
+        if provider == .anthropic {
+            request.setValue(key, forHTTPHeaderField: "x-api-key")
+            request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        } else if let key {
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "authorization")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw AIError.http(status: http.statusCode, message: SSEParser.errorMessage(fromBody: data))
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let items = json["data"] as? [[String: Any]]
+        else { throw AIError.invalidResponse }
+        return items.compactMap { $0["id"] as? String }.sorted()
+    }
+}
+
+// MARK: - Run state
+
+/// One streaming AI request shown in the quick panel's preview pane.
+@Observable
+final class AIRun {
+    let action: AIAction
+    let item: ClipItem
+    let providerName: String
+    private(set) var output = ""
+    private(set) var isStreaming = false
+    private(set) var error: AIError?
+    private(set) var errorMessage: String?
+    @ObservationIgnored private var task: Task<Void, Never>?
+
+    init(action: AIAction, item: ClipItem, providerName: String) {
+        self.action = action
+        self.item = item
+        self.providerName = providerName
+    }
+
+    var isFinished: Bool { !isStreaming && errorMessage == nil && !output.isEmpty }
+
+    func start(prefs: Preferences) {
+        let client: any AIStreamingClient
+        do {
+            client = try AIClientFactory.make(provider: prefs.aiProvider, model: prefs.aiModel, customBaseURL: prefs.customBaseURL)
+        } catch {
+            fail(error)
+            return
+        }
+        let system = action.systemPrompt
+        let user = AIAction.userMessage(for: item.text)
+        isStreaming = true
+        task = Task { [weak self] in
+            do {
+                for try await chunk in client.stream(system: system, user: user) {
+                    self?.output += chunk
+                }
+                self?.isStreaming = false
+                if self?.output.isEmpty == true { self?.errorMessage = "The model returned an empty response." }
+            } catch is CancellationError {
+                self?.isStreaming = false
+            } catch {
+                self?.isStreaming = false
+                if (error as? URLError)?.code == .cancelled { return }
+                self?.fail(error)
+            }
+        }
+    }
+
+    private func fail(_ error: Error) {
+        self.error = error as? AIError
+        errorMessage = error.localizedDescription
+        Log.claude.error("AI request failed: \(error.localizedDescription, privacy: .public)")
+    }
+
+    func cancel() {
+        task?.cancel()
+        task = nil
+        isStreaming = false
+    }
+}

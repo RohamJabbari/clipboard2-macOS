@@ -1,0 +1,91 @@
+name: Clippy
+options:
+  bundleIdPrefix: at.softmaze
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+    SWIFT_APPROACHABLE_CONCURRENCY: YES
+    DEVELOPMENT_TEAM: XWTH2647FF
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "Apple Development"
+    ENABLE_HARDENED_RUNTIME: YES
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEAD_CODE_STRIPPING: YES
+
+packages:
+  KeyboardShortcuts:
+    url: https://github.com/sindresorhus/KeyboardShortcuts
+    from: "2.0.0"
+
+targets:
+  Clippy:
+    type: application
+    platform: macOS
+    sources:
+      - path: Clippy
+    info:
+      path: Clippy/Info.plist
+      properties:
+        CFBundleDisplayName: Clippy
+        CFBundleName: Clippy
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSUIElement: true
+        LSApplicationCategoryType: public.app-category.productivity
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        NSHumanReadableCopyright: "© 2026 Softmaze Solutions GmbH"
+        CFBundleURLTypes:
+          - CFBundleURLName: at.softmaze.Clippy
+            CFBundleURLSchemes: [clippy]
+    entitlements:
+      path: Clippy/Clippy.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+    settings:
+      base:
+        PRODUCT_NAME: Clippy
+        PRODUCT_BUNDLE_IDENTIFIER: at.softmaze.Clippy
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_APP_SANDBOX: NO
+        COMBINE_HIDPI_IMAGES: YES
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: at.softmaze.Clippy.debug
+    dependencies:
+      - package: KeyboardShortcuts
+
+  ClippyTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: ClippyTests
+    dependencies:
+      - target: Clippy
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: at.softmaze.ClippyTests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  Clippy:
+    build:
+      targets:
+        Clippy: all
+        ClippyTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - ClippyTests
+    archive:
+      config: Release
