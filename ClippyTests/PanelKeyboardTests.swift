@@ -113,4 +113,22 @@ struct PanelKeyboardTests {
         model.actionQuery = "zzqxj"
         #expect(model.filteredActions == [.ai(.instruction("zzqxj"))])
     }
+
+    @Test func selectionModeOffersOnlyTransientActions() {
+        let before = env.store.count()
+        model.prepareForSelection("selected words", target: nil)
+        #expect(model.mode == .actions)
+        #expect(model.entries.count == 1)
+        #expect(model.selectedEntry?.clip?.isTransient == true)
+        let actions = model.availableActions
+        #expect(actions.contains(.ai(.fixGrammar)))
+        #expect(actions.contains(.transform(.uppercase)))
+        #expect(!actions.contains(.delete) && !actions.contains(.togglePin) && !actions.contains(.setLabel))
+        #expect(env.store.count() == before)       // never written to history
+
+        var closed = false
+        model.onClose = { closed = true }
+        #expect(model.handleKeyDown(key(KeyCode.escape, "\u{1b}")))
+        #expect(closed)
+    }
 }

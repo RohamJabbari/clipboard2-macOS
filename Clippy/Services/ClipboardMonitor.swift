@@ -110,11 +110,19 @@ final class ClipboardMonitor {
         timer = nil
     }
 
+    /// While true, pasteboard changes are acknowledged but not captured (used while Clippy
+    /// borrows the clipboard to read the current selection).
+    @ObservationIgnored var isSuspended = false
+
+    func acknowledgeCurrentChange() {
+        lastChangeCount = pasteboard.changeCount
+    }
+
     private func tick() {
         let count = pasteboard.changeCount
         guard count != lastChangeCount else { return }
         lastChangeCount = count
-        guard !prefs.isPaused else { return }
+        guard !prefs.isPaused, !isSuspended else { return }
         autoreleasepool { captureCurrent() }
     }
 

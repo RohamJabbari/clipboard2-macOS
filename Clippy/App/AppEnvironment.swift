@@ -5,6 +5,7 @@ import KeyboardShortcuts
 
 extension KeyboardShortcuts.Name {
     static let toggleQuickPanel = Self("toggleQuickPanel", default: .init(.v, modifiers: [.command, .shift]))
+    static let selectionActions = Self("selectionActions", default: .init(.k, modifiers: [.command, .option]))
 }
 
 /// Owns every long-lived service. Created once at launch and injected into SwiftUI via `.environment`.
@@ -33,6 +34,7 @@ final class AppEnvironment {
     @ObservationIgnored private let onboarding = AccessibilityOnboardingController()
 
     @ObservationIgnored private var maintenanceTimer: Timer?
+    @ObservationIgnored private lazy var serviceProvider = ServiceProvider(env: self)
     @ObservationIgnored private var maintenanceRuns = 0
     #if DEBUG
     @ObservationIgnored private var stressMonitor: ClipboardMonitor?
@@ -94,6 +96,12 @@ final class AppEnvironment {
         KeyboardShortcuts.onKeyDown(for: .toggleQuickPanel) { [weak self] in
             self?.panel.toggle()
         }
+        // Key-up, so the user's ⌥⌘ are released before we send ⌘C to the other app.
+        KeyboardShortcuts.onKeyUp(for: .selectionActions) { [weak self] in
+            self?.showSelectionActions()
+        }
+        NSApp.servicesProvider = serviceProvider
+        NSUpdateDynamicServices()
         for (index, name) in KeyboardShortcuts.Name.quickSlots.enumerated() {
             KeyboardShortcuts.onKeyDown(for: name) { [weak self] in
                 self?.pasteSlot(index + 1)
@@ -167,6 +175,36 @@ final class AppEnvironment {
             guard let value = await secrets.reveal(ref, reason: "copy “\(ref.name)”") else { return }
             paste.writeSecret(value, clearAfter: prefs.secretClearSeconds)
         }
+    }
+
+    // MARK: Actions on selected text (⌥⌘K and Services menu)
+
+    /// Copies the selection in the frontmost app, restores the clipboard, and opens the action
+    /// menu for that text. The temporary copy is never recorded in history.
+    func showSelectionActions() {
+        guard AXPermission.isTrusted else {
+            showAccessibilityOnboarding()
+            return
+        }
+        let target = appTracker.targetApp
+        Task {
+            monitor.isSuspended = true
+            let saved = paste.snapshot()
+            let text = await paste.copySelectedText()
+            paste.restore(saved)
+            monitor.acknowledgeCurrentChange()
+            monitor.isSuspended = false
+            guard let text else {
+                NSSound.beep()
+                return
+            }
+            panel.showForSelection(text, target: target)
+        }
+    }
+
+    /// Services menu entry point: the system hands us the selected text directly.
+    func showSelectionActions(text: String) {
+        panel.showForSelection(text, target: appTracker.targetApp)
     }
 
     /// Global quick-slot shortcut: paste straight into the frontmost app.

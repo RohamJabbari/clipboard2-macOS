@@ -240,7 +240,24 @@ final class PanelViewModel {
 
     // MARK: Lifecycle
 
+    /// Text selected in another app (via ⌥⌘K or the Services menu). It's a transient item:
+    /// never saved to history unless the user explicitly saves it.
+    private(set) var selectionItem: ClipItem?
+
+    var isSelectionMode: Bool { selectionItem != nil }
+
+    func prepareForSelection(_ text: String, target: NSRunningApplication?) {
+        prepareForOpen(target: target)
+        let item = ClipItem(capture: .text(text, source: target.flatMap(FrontmostAppTracker.ref(for:))))
+        selectionItem = item
+        entries = [.clip(item)]
+        selectedID = PanelEntry.clip(item).id
+        actionQuery = ""
+        mode = .actions
+    }
+
     func prepareForOpen(target: NSRunningApplication?) {
+        selectionItem = nil
         resetMode()
         notice = nil
         targetApp = target
@@ -251,6 +268,7 @@ final class PanelViewModel {
     }
 
     func didClose() {
+        selectionItem = nil
         resetMode()
     }
 
@@ -277,6 +295,11 @@ final class PanelViewModel {
     }
 
     func refresh(resetSelection: Bool = false) {
+        if let selectionItem {
+            entries = [.clip(selectionItem)]
+            selectedID = PanelEntry.clip(selectionItem).id
+            return
+        }
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let targetBundle = targetApp?.bundleIdentifier
 
@@ -556,7 +579,7 @@ final class PanelViewModel {
             showNotice("Couldn't save to the Keychain")
             return
         }
-        env.store.delete(form.item)
+        if !form.item.isTransient { env.store.delete(form.item) }
         resetMode()
         refresh()
         showNotice("Saved “\(name)” to Secrets and removed it from history")
@@ -590,6 +613,14 @@ final class PanelViewModel {
         guard let entry = selectedEntry else { return [] }
         var actions: [PanelAction] = [.paste]
         switch entry {
+        case .clip(let item) where item.isTransient:
+            // Selected text from another app: only transform it, ask AI, or keep it.
+            actions = [.copy]
+            actions += AIAction.builtIn.map(PanelAction.ai)
+            actions += env.prefs.customPrompts.map { PanelAction.ai(.custom($0)) }
+            actions += Transform.allCases.filter { $0 != .plainText }.map(PanelAction.transform)
+            actions.append(.saveAsSecret)
+            return actions
         case .clip(let item):
             if item.kind.isTextual { actions.append(.pastePlain) }
             actions.append(.copy)
@@ -647,6 +678,7 @@ final class PanelViewModel {
             activate(entry, transform: .plainText)
         case .copy:
             switch entry {
+            case .clip(let item) where item.isTransient: env.paste.write(text: item.text)
             case .clip(let item): env.paste.copy(item)
             case .secret(let ref): env.copySecret(ref)
             case .snippet: break
@@ -659,7 +691,7 @@ final class PanelViewModel {
                 return
             }
             let target = targetApp
-            env.store.touch(item)
+            if !item.isTransient { env.store.touch(item) }
             onClose()
             env.paste.paste(text: result, into: target)
         case .ai(let aiAction):
@@ -742,7 +774,7 @@ final class PanelViewModel {
     }
 
     func replaceItemWithAIOutput() {
-        guard let run = aiRun, run.isFinished else { return }
+        guard let run = aiRun, run.isFinished, !run.item.isTransient else { return }
         env.store.replaceText(of: run.item, with: run.output)
         resetMode()
         refresh()
@@ -873,7 +905,7 @@ final class PanelViewModel {
         let actions = filteredActions
         switch event.keyCode {
         case KeyCode.escape:
-            mode = .browse
+            if isSelectionMode { onClose() } else { mode = .browse }
         case KeyCode.upArrow:
             actionSelection = max(0, actionSelection - 1)
         case KeyCode.downArrow:
@@ -909,7 +941,13 @@ final class PanelViewModel {
         let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
         switch event.keyCode {
         case KeyCode.escape:
-            resetMode()
+            if isSelectionMode {
+                aiRun?.cancel()
+                aiRun = nil
+                mode = .actions
+            } else {
+                resetMode()
+            }
         case KeyCode.returnKey, KeyCode.keypadEnter:
             if aiRun?.isFinished == true { pasteAIOutput() }
         default:

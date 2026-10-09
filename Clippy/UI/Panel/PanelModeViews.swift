@@ -249,13 +249,15 @@ struct AIResultView: View {
                     }
                 }
                 Spacer()
-                Button("Replace Item") { model.replaceItemWithAIOutput() }
-                    .disabled(!run.isFinished)
-                    .help("⌘R")
+                if !run.item.isTransient {
+                    Button("Replace Item") { model.replaceItemWithAIOutput() }
+                        .disabled(!run.isFinished)
+                        .help("⌘R")
+                }
                 Button("Copy") { model.copyAIOutput() }
                     .disabled(run.output.isEmpty)
                     .help("⌘C")
-                Button("Paste") { model.pasteAIOutput() }
+                Button(run.item.isTransient ? "Replace Selection" : "Paste") { model.pasteAIOutput() }
                     .disabled(!run.isFinished)
                     .buttonStyle(.borderedProminent)
                     .help("Return")

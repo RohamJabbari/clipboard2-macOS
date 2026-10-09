@@ -51,6 +51,10 @@ struct GeneralSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 KeyboardShortcuts.Recorder("Open quick panel", name: .toggleQuickPanel)
+                KeyboardShortcuts.Recorder("Actions on selected text", name: .selectionActions)
+                Text("Select text in any app and press this to transform it or ask AI; Return replaces the selection. In apps with a Services menu it's also under right-click → Services → Clippy Actions…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Capture") {

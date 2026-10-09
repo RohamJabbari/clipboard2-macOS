@@ -89,6 +89,9 @@ final class ClipItem {
         return AppRef(bundleID: sourceBundleID, name: sourceAppName ?? sourceBundleID)
     }
 
+    /// True for text selected in another app that hasn't been saved to history.
+    var isTransient: Bool { modelContext == nil }
+
     /// Row title: the label if there is one, otherwise the content excerpt.
     var displayTitle: String {
         if let label, !label.isEmpty { return label }

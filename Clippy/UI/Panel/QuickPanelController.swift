@@ -52,7 +52,16 @@ final class QuickPanelController: NSObject, NSWindowDelegate {
     func show() {
         let target = env.appTracker.targetApp
         model.prepareForOpen(target: target)
+        present(target: target)
+    }
 
+    /// Opens straight into the action menu for text selected in `target`.
+    func showForSelection(_ text: String, target: NSRunningApplication?) {
+        model.prepareForSelection(text, target: target)
+        present(target: target)
+    }
+
+    private func present(target: NSRunningApplication?) {
         let panel = self.panel ?? makePanel()
         self.panel = panel
 

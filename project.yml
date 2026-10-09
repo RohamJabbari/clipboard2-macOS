@@ -46,6 +46,13 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: at.softmaze.Clippy
             CFBundleURLSchemes: [clippy]
+        NSServices:
+          - NSMenuItem:
+              default: Clippy Actions…
+            NSMessage: clippyActions
+            NSPortName: Clippy
+            NSSendTypes: [public.utf8-plain-text, NSStringPboardType]
+            NSRequiredContext: {}
     entitlements:
       path: Clippy/Clippy.entitlements
       properties:

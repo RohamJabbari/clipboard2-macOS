@@ -173,6 +173,42 @@ final class PasteService {
         }
     }
 
+    // MARK: Reading the current selection
+
+    typealias Snapshot = [[NSPasteboard.PasteboardType: Data]]
+
+    func snapshot() -> Snapshot {
+        (pasteboard.pasteboardItems ?? []).map { item in
+            var data: [NSPasteboard.PasteboardType: Data] = [:]
+            for type in item.types { data[type] = item.data(forType: type) }
+            return data
+        }
+    }
+
+    func restore(_ snapshot: Snapshot) {
+        pasteboard.clearContents()
+        let items = snapshot.map { dict -> NSPasteboardItem in
+            let item = NSPasteboardItem()
+            for (type, data) in dict { item.setData(data, forType: type) }
+            return item
+        }
+        if !items.isEmpty { pasteboard.writeObjects(items) }
+    }
+
+    /// Sends ⌘C to the frontmost app and returns the copied text (nil if nothing was selected).
+    /// The caller restores the previous clipboard afterwards.
+    func copySelectedText() async -> String? {
+        let before = pasteboard.changeCount
+        Self.postKey(8, flags: .maskCommand)                 // kVK_ANSI_C
+        for _ in 0..<25 {
+            try? await Task.sleep(for: .milliseconds(20))
+            if pasteboard.changeCount != before { break }
+        }
+        guard pasteboard.changeCount != before else { return nil }
+        let text = pasteboard.string(forType: .string)
+        return text?.isEmpty == false ? text : nil
+    }
+
     private static func postKey(_ keyCode: CGKeyCode, flags: CGEventFlags) {
         let source = CGEventSource(stateID: .combinedSessionState)
         source?.setLocalEventsFilterDuringSuppressionState(
