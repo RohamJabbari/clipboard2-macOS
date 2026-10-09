@@ -33,6 +33,9 @@ struct MenuBarContentView: View {
 
     @State private var search = ""
     @State private var confirmClear = false
+    @State private var savingSecret: ClipItem?
+    @State private var secretName = ""
+    @FocusState private var secretNameFocused: Bool
     @FocusState private var searchFocused: Bool
 
     private var filtered: [ClipItem] {
@@ -81,7 +84,9 @@ struct MenuBarContentView: View {
             }
 
             Divider()
-            if confirmClear {
+            if let item = savingSecret {
+                saveSecretBar(item)
+            } else if confirmClear {
                 clearConfirmation
             } else {
                 footer
@@ -89,7 +94,10 @@ struct MenuBarContentView: View {
         }
         .frame(width: 380, height: 520)
         .onAppear { searchFocused = true }
-        .onDisappear { confirmClear = false }
+        .onDisappear {
+            confirmClear = false
+            savingSecret = nil
+        }
     }
 
     private var searchField: some View {
@@ -136,6 +144,13 @@ struct MenuBarContentView: View {
                 Button("Copy") { env.paste.copy(item) }
                 Divider()
                 Button(item.isPinned ? "Unpin" : "Pin") { env.store.togglePin(item) }
+                if item.kind.isTextual {
+                    Button("Save as Secret…") {
+                        confirmClear = false
+                        secretName = item.sourceAppName.map { "Password from \($0)" } ?? "New Secret"
+                        savingSecret = item
+                    }
+                }
                 Menu("Assign to Quick Slot") {
                     ForEach(QuickSlots.range, id: \.self) { n in
                         Button("⌘\(n)\(env.slots.title(for: n).map { " — " + $0 } ?? "")") {
@@ -146,6 +161,37 @@ struct MenuBarContentView: View {
                 Button("Delete", role: .destructive) { env.store.delete(item) }
             }
         }
+    }
+
+    private func saveSecretBar(_ item: ClipItem) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Save as secret — moves it to the Keychain and out of history")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                TextField("Name", text: $secretName, prompt: Text("e.g. Prod DB password"))
+                    .textFieldStyle(.roundedBorder)
+                    .focused($secretNameFocused)
+                    .onSubmit { saveSecret(item) }
+                Button("Cancel") { savingSecret = nil }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") { saveSecret(item) }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(secretName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .onAppear { secretNameFocused = true }
+    }
+
+    private func saveSecret(_ item: ClipItem) {
+        let name = secretName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, env.secrets.add(name: name, value: item.text) != nil else { return }
+        env.slots.remove(target: .clip(item.id))
+        env.store.delete(item)
+        savingSecret = nil
     }
 
     /// Inline instead of a dialog: a modal sheet steals focus from the menu bar window,

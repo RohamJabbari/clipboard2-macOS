@@ -474,6 +474,12 @@ final class PanelViewModel {
         env.pasteSnippet(form.snippet, values: form.values, into: target)
     }
 
+    func beginSaveSecret(_ item: ClipItem) {
+        selectedID = PanelEntry.clip(item).id
+        saveSecretForm = SaveSecretState(item: item)
+        mode = .saveSecret
+    }
+
     func submitSaveSecret() {
         guard let form = saveSecretForm else { return }
         let name = form.name.trimmingCharacters(in: .whitespaces)
@@ -588,8 +594,7 @@ final class PanelViewModel {
             run.start(prefs: env.prefs)
         case .saveAsSecret:
             guard let item = entry.clip else { return }
-            saveSecretForm = SaveSecretState(item: item)
-            mode = .saveSecret
+            beginSaveSecret(item)
         case .clearSlot(let number):
             env.slots.clear(number)
             mode = .browse

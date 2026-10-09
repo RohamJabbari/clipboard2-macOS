@@ -133,6 +133,9 @@ struct QuickPanelView: View {
             Button("Copy") { env.paste.copy(item) }
             Divider()
             Button(item.isPinned ? "Unpin" : "Pin") { env.store.togglePin(item); model.refresh() }
+            if item.kind.isTextual {
+                Button("Save as Secret…") { model.beginSaveSecret(item) }
+            }
             Button("Delete", role: .destructive) { env.store.delete(item); model.refresh() }
         }
     }
