@@ -11,7 +11,7 @@ INSTALL_DIR := /Applications
 # signature (Accessibility/Keychain grants are tied to it). Otherwise Apple Development.
 DEVID_APP := $(shell security find-identity -v -p codesigning 2>/dev/null | grep -c "Developer ID Application")
 ifneq ($(DEVID_APP),0)
-SIGN_ARGS := CODE_SIGN_IDENTITY="Developer ID Application" OTHER_CODE_SIGN_FLAGS=--timestamp
+SIGN_ARGS := CODE_SIGN_IDENTITY="Developer ID Application" DEVELOPMENT_TEAM=XWTH2647FF CODE_SIGN_STYLE=Manual OTHER_CODE_SIGN_FLAGS=--timestamp
 endif
 
 all: build

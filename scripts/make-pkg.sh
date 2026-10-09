@@ -27,7 +27,7 @@ xcodegen generate --quiet
 SIGN_ARGS=()
 if [[ -n "$APP_ID" ]]; then
     echo "  app signing: $APP_ID"
-    SIGN_ARGS=(CODE_SIGN_IDENTITY="Developer ID Application" OTHER_CODE_SIGN_FLAGS=--timestamp)
+    SIGN_ARGS=(CODE_SIGN_IDENTITY="Developer ID Application" DEVELOPMENT_TEAM=XWTH2647FF CODE_SIGN_STYLE=Manual OTHER_CODE_SIGN_FLAGS=--timestamp)
 else
     echo "  app signing: Apple Development (no Developer ID Application certificate found)"
 fi
