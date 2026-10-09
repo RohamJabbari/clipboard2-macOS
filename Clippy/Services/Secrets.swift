@@ -80,6 +80,27 @@ nonisolated enum SecretVault {
     }
 }
 
+nonisolated enum UnlockDuration: Int, CaseIterable, Identifiable, Sendable {
+    case fifteenMinutes = 900
+    case oneHour = 3_600
+    case eightHours = 28_800
+    case oneDay = 86_400
+    case oneWeek = 604_800
+
+    var id: Int { rawValue }
+    var interval: TimeInterval { TimeInterval(rawValue) }
+
+    var title: String {
+        switch self {
+        case .fifteenMinutes: "15 Minutes"
+        case .oneHour: "1 Hour"
+        case .eightHours: "8 Hours"
+        case .oneDay: "1 Day"
+        case .oneWeek: "1 Week"
+        }
+    }
+}
+
 /// Lists secrets, gates access behind Touch ID / password, and pastes them so that no
 /// clipboard manager (including Clippy) records them.
 @Observable
@@ -90,6 +111,9 @@ final class SecretStore {
     @ObservationIgnored private(set) var valueHashes: Set<String> = []
     @ObservationIgnored var onChange: (() -> Void)?
     @ObservationIgnored private var lastAuthentication: Date?
+    /// Explicit "Leave Unlocked For…" choice. Unlike the automatic window it survives sleep and
+    /// screen lock (that's the point of choosing it), but not quitting Clippy.
+    private(set) var unlockedUntil: Date?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private let prefs: Preferences
 
@@ -137,17 +161,36 @@ final class SecretStore {
     }
 
     var isUnlocked: Bool {
+        if isManuallyUnlocked { return true }
         guard prefs.secretGraceMinutes > 0, let lastAuthentication else { return false }
         return Date.now.timeIntervalSince(lastAuthentication) < TimeInterval(prefs.secretGraceMinutes * 60)
     }
 
+    var isManuallyUnlocked: Bool {
+        guard let unlockedUntil else { return false }
+        return unlockedUntil > .now
+    }
+
+    /// Always asks for Touch ID (even inside the automatic window), then stays unlocked.
+    @discardableResult
+    func unlock(for duration: UnlockDuration) async -> Bool {
+        guard await evaluate(reason: "leave secrets unlocked for \(duration.title.lowercased())") else { return false }
+        unlockedUntil = Date.now.addingTimeInterval(duration.interval)
+        return true
+    }
+
     func lock() {
         lastAuthentication = nil
+        unlockedUntil = nil
     }
 
     /// Touch ID (or the login password) unless still inside the unlock window.
     func authenticate(reason: String) async -> Bool {
         if isUnlocked { return true }
+        return await evaluate(reason: reason)
+    }
+
+    private func evaluate(reason: String) async -> Bool {
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {

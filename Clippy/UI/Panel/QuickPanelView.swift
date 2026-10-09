@@ -26,7 +26,7 @@ struct QuickPanelView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { searchFocused = true }
-        .onChange(of: model.focusToken) { searchFocused = model.mode != .snippetForm && model.mode != .saveSecret }
+        .onChange(of: model.focusToken) { searchFocused = ![.snippetForm, .saveSecret, .label].contains(model.mode) }
         .onChange(of: env.store.revision) { model.refresh() }
         .onChange(of: env.snippets.revision) { model.refresh() }
         .onChange(of: env.secrets.revision) { model.refresh() }
@@ -120,6 +120,9 @@ struct QuickPanelView: View {
     @ViewBuilder
     private func contextMenu(for entry: PanelEntry) -> some View {
         Button("Paste") { model.activate(entry) }
+        if case .secret = entry {
+            Button("Rename…") { model.beginLabel(entry) }
+        }
         Menu("Assign to Quick Slot") {
             ForEach(QuickSlots.range, id: \.self) { n in
                 Button("⌘\(n)\(env.slots.title(for: n).map { " — " + $0 } ?? "")") {
@@ -133,6 +136,7 @@ struct QuickPanelView: View {
             Button("Copy") { env.paste.copy(item) }
             Divider()
             Button(item.isPinned ? "Unpin" : "Pin") { env.store.togglePin(item); model.refresh() }
+            Button(item.label == nil ? "Label…" : "Edit Label…") { model.beginLabel(entry) }
             if item.kind.isTextual {
                 Button("Save as Secret…") { model.beginSaveSecret(item) }
             }
@@ -150,6 +154,10 @@ struct QuickPanelView: View {
         case .snippetForm:
             if let form = model.snippetForm {
                 SnippetFormView(form: form) { model.submitSnippetForm() }
+            }
+        case .label:
+            if let form = model.labelForm {
+                LabelFormView(form: form) { model.submitLabel() }
             }
         case .saveSecret:
             if let form = model.saveSecretForm {
@@ -301,7 +309,7 @@ struct PanelRow: View {
 
     private var title: String {
         switch entry {
-        case .clip(let item): item.preview.isEmpty ? item.kind.displayName : item.preview
+        case .clip(let item): item.displayTitle
         case .snippet(let snippet): snippet.name.isEmpty ? "Untitled Snippet" : snippet.name
         case .secret(let ref): ref.name
         }
@@ -310,11 +318,16 @@ struct PanelRow: View {
     private var subtitle: String {
         switch entry {
         case .clip(let item):
-            [item.sourceAppName, item.lastCopiedAt.shortRelative].compactMap { $0 }.joined(separator: " · ")
+            if item.label != nil {
+                // Labelled: the label is the title, the value goes underneath.
+                item.preview.isEmpty ? item.kind.displayName : item.preview
+            } else {
+                [item.sourceAppName, item.lastCopiedAt.shortRelative].compactMap { $0 }.joined(separator: " · ")
+            }
         case .snippet(let snippet):
             snippet.keyword.isEmpty ? "Snippet" : "Snippet · \(snippet.keyword)"
         case .secret:
-            "Secret · ••••••••"
+            "••••••••"
         }
     }
 
@@ -359,7 +372,7 @@ struct HintBar: View {
             case .snippetForm:
                 hint("⇥", "Next Field")
                 hint("⏎", "Paste")
-            case .saveSecret:
+            case .saveSecret, .label:
                 hint("⏎", "Save")
             case .ai:
                 hint("⏎", "Paste")

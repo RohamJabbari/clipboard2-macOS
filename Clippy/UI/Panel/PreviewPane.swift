@@ -37,6 +37,9 @@ struct PreviewPane: View {
         switch entry {
         case .clip(let item):
             VStack(alignment: .leading, spacing: 6) {
+                if let label = item.label {
+                    LabeledContent("Label", value: label)
+                }
                 if let source = item.source {
                     HStack(spacing: 6) {
                         Image(nsImage: AppIconCache.icon(for: source.bundleID))
@@ -53,6 +56,7 @@ struct PreviewPane: View {
                     LabeledContent("Times copied", value: "\(item.copyCount)")
                 }
                 LabeledContent("Type", value: detailType(item))
+                LabeledContent("Expires", value: expiryText(item))
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -73,6 +77,13 @@ struct PreviewPane: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
+    }
+
+    private func expiryText(_ item: ClipItem) -> String {
+        if item.isPinned { return "Never (pinned)" }
+        guard let date = item.expiryDate(maxAge: AppEnvironment.shared.prefs.maxAge) else { return "Never" }
+        if date <= .now { return "Now" }
+        return date.formatted(.relative(presentation: .named))
     }
 
     private func detailType(_ item: ClipItem) -> String {
@@ -170,6 +181,7 @@ struct FilePreviewView: View {
 struct SecretPreviewView: View {
     let ref: SecretRef
     @Environment(AppEnvironment.self) private var env
+    @State private var revealed: String?
 
     var body: some View {
         VStack(spacing: 12) {
@@ -178,18 +190,34 @@ struct SecretPreviewView: View {
                 .foregroundStyle(.tint)
                 .accessibilityHidden(true)
             Text(ref.name).font(.title3.weight(.semibold))
-            Text("••••••••••")
-                .font(.title3.monospaced())
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Hidden value")
+            if let revealed {
+                Text(revealed)
+                    .font(.title3.monospaced())
+                    .textSelection(.enabled)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(4)
+                Button("Hide") { self.revealed = nil }
+            } else {
+                Text("••••••••••")
+                    .font(.title3.monospaced())
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Hidden value")
+                Button("Show") {
+                    Task { revealed = await env.secrets.reveal(ref, reason: "show “\(ref.name)”") }
+                }
+            }
             Text(hint)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
+            SecretUnlockControl(secrets: env.secrets)
+                .controlSize(.small)
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: ref.id) { revealed = nil }
+        .onDisappear { revealed = nil }
     }
 
     private var hint: String {

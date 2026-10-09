@@ -32,6 +32,7 @@ final class AppEnvironment {
     @ObservationIgnored private let onboarding = AccessibilityOnboardingController()
 
     @ObservationIgnored private var maintenanceTimer: Timer?
+    @ObservationIgnored private var maintenanceRuns = 0
     #if DEBUG
     @ObservationIgnored private var stressMonitor: ClipboardMonitor?
     #endif
@@ -80,10 +81,12 @@ final class AppEnvironment {
         monitor.start()
         runMaintenance()
 
-        let timer = Timer(timeInterval: 60 * 30, repeats: true) { [weak self] _ in
+        // Every minute so short expiry times (15 min, 1 h) are honoured promptly; the work is a
+        // single indexed fetch when nothing has expired.
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.runMaintenance() }
         }
-        timer.tolerance = 60
+        timer.tolerance = 15
         RunLoop.main.add(timer, forMode: .common)
         maintenanceTimer = timer
 
@@ -131,7 +134,8 @@ final class AppEnvironment {
 
     func runMaintenance() {
         store.enforceRetention(maxItems: prefs.maxItems, maxAge: prefs.maxAge)
-        store.removeOrphanedBlobs()
+        maintenanceRuns &+= 1
+        if maintenanceRuns % 30 == 1 { store.removeOrphanedBlobs() }   // directory scan: every ~30 min
     }
 
     func applyAppearance() {

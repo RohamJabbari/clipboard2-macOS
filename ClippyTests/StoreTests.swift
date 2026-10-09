@@ -161,6 +161,35 @@ struct StoreTests {
         #expect(blobs.allFileNames().isEmpty)
     }
 
+    @Test func zeroMaxItemsMeansNoCountLimit() {
+        for i in 0..<20 { store.ingest(.text("n\(i)")) }
+        store.enforceRetention(maxItems: 0, maxAge: nil)
+        #expect(store.count() == 20)
+    }
+
+    @Test func shortAgeLimitsExpireInMinutes() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        store.ingest(.text("20 min old"), now: now.addingTimeInterval(-20 * 60))
+        store.ingest(.text("5 min old"), now: now.addingTimeInterval(-5 * 60))
+        store.enforceRetention(maxItems: 0, maxAge: 15 * 60, now: now)
+        #expect(store.allItems().map(\.text) == ["5 min old"])
+    }
+
+    @Test func labellingPinsAndIsSearchable() {
+        let item = store.ingest(.text("10.0.4.12:5432"), now: Date(timeIntervalSince1970: 1))
+        store.setLabel("  Staging DB host ", for: item)
+        #expect(item.label == "Staging DB host")
+        #expect(item.isPinned)
+        #expect(item.displayTitle == "Staging DB host")
+        #expect(FuzzyMatcher.score(query: "staging", in: item.searchableText) != nil)
+        store.enforceRetention(maxItems: 0, maxAge: 60, now: Date(timeIntervalSince1970: 1_000_000))
+        #expect(store.count() == 1)
+
+        store.setLabel("   ", for: item)
+        #expect(item.label == nil)
+        #expect(item.displayTitle == "10.0.4.12:5432")
+    }
+
     @Test func clearHistoryKeepsPinned() {
         let a = store.ingest(.text("a"))
         store.ingest(.text("b"))

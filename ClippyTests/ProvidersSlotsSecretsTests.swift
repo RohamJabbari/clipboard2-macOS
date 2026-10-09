@@ -163,3 +163,42 @@ struct ClaudeAccountTests {
         #expect(AIError.notSignedIn.needsSettings)
     }
 }
+
+struct PreferenceMigrationTests {
+    @Test func legacyDaysBecomeMinutes() throws {
+        let defaults = try #require(UserDefaults(suiteName: "ClippyPrefs-\(UUID().uuidString)"))
+        defaults.set(7, forKey: Preferences.Key.maxAgeDays)
+        let prefs = Preferences(defaults: defaults)
+        #expect(prefs.maxAgeMinutes == 7 * 1_440)
+        #expect(prefs.maxAge == TimeInterval(7 * 86_400))
+    }
+
+    @Test func defaultsAreThirtyDaysAnd500Items() throws {
+        let prefs = Preferences(defaults: try #require(UserDefaults(suiteName: "ClippyPrefs-\(UUID().uuidString)")))
+        #expect(prefs.maxAgeMinutes == 43_200)
+        #expect(prefs.maxItems == 500)
+    }
+
+    @Test func ageDescriptions() {
+        #expect(Preferences.describeAge(minutes: 15) == "15 minutes")
+        #expect(Preferences.describeAge(minutes: 60) == "1 hour")
+        #expect(Preferences.describeAge(minutes: 480) == "8 hours")
+        #expect(Preferences.describeAge(minutes: 1_440) == "1 day")
+        #expect(Preferences.describeAge(minutes: 43_200) == "30 days")
+        #expect(Preferences.describeAge(minutes: 0) == "Never")
+    }
+}
+
+struct UnlockDurationTests {
+    @Test func durationsMatchMenu() {
+        #expect(UnlockDuration.allCases.map(\.title) == ["15 Minutes", "1 Hour", "8 Hours", "1 Day", "1 Week"])
+        #expect(UnlockDuration.oneWeek.interval == 7 * 86_400)
+    }
+
+    @MainActor @Test func lockClearsManualUnlock() throws {
+        let secrets = SecretStore(prefs: Preferences(defaults: try #require(UserDefaults(suiteName: "ClippyUnlock-\(UUID())"))))
+        #expect(!secrets.isManuallyUnlocked)
+        secrets.lock()
+        #expect(!secrets.isUnlocked)
+    }
+}

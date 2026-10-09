@@ -64,6 +64,7 @@ enum PanelMode: Equatable {
     case actions
     case snippetForm
     case saveSecret
+    case label
     case ai
 }
 
@@ -74,6 +75,7 @@ enum PanelAction: Identifiable, Hashable {
     case transform(Transform)
     case ai(AIAction)
     case saveAsSecret
+    case setLabel
     case clearSlot(Int)
     case togglePin
     case delete
@@ -86,6 +88,7 @@ enum PanelAction: Identifiable, Hashable {
         case .transform(let t): "transform-" + t.rawValue
         case .ai(let a): "ai-" + a.id
         case .saveAsSecret: "saveAsSecret"
+        case .setLabel: "setLabel"
         case .clearSlot(let n): "clearSlot-\(n)"
         case .togglePin: "pin"
         case .delete: "delete"
@@ -97,7 +100,7 @@ enum PanelAction: Identifiable, Hashable {
         case .paste, .pastePlain, .copy: "Paste"
         case .transform: "Transform & Paste"
         case .ai: "Ask \(aiName)"
-        case .saveAsSecret, .clearSlot, .togglePin, .delete: "Item"
+        case .saveAsSecret, .setLabel, .clearSlot, .togglePin, .delete: "Item"
         }
     }
 
@@ -109,6 +112,7 @@ enum PanelAction: Identifiable, Hashable {
         case .transform(let t): t.title
         case .ai(let a): a.title
         case .saveAsSecret: "Save as Secret…"
+        case .setLabel: "Label…"
         case .clearSlot(let n): "Remove from Quick Slot ⌘\(n)"
         case .togglePin: isPinned ? "Unpin" : "Pin"
         case .delete: "Delete"
@@ -123,6 +127,7 @@ enum PanelAction: Identifiable, Hashable {
         case .transform(let t): t.symbol
         case .ai(let a): a.symbol
         case .saveAsSecret: "key"
+        case .setLabel: "tag"
         case .clearSlot: "number.square"
         case .togglePin: "pin"
         case .delete: "trash"
@@ -155,6 +160,37 @@ final class SaveSecretState {
 }
 
 @Observable
+final class LabelFormState {
+    enum Target {
+        case clip(ClipItem)
+        case secret(SecretRef)
+    }
+
+    let target: Target
+    var text: String
+
+    init(target: Target) {
+        self.target = target
+        switch target {
+        case .clip(let item): text = item.label ?? ""
+        case .secret(let ref): text = ref.name
+        }
+    }
+
+    var valuePreview: String {
+        switch target {
+        case .clip(let item): item.preview.isEmpty ? item.kind.displayName : item.preview
+        case .secret: "••••••••"
+        }
+    }
+
+    var isSecret: Bool {
+        if case .secret = target { return true }
+        return false
+    }
+}
+
+@Observable
 final class PanelViewModel {
     @ObservationIgnored let env: AppEnvironment
     @ObservationIgnored var onClose: () -> Void = {}
@@ -182,6 +218,7 @@ final class PanelViewModel {
     var actionSelection = 0
     private(set) var snippetForm: SnippetFormState?
     private(set) var saveSecretForm: SaveSecretState?
+    private(set) var labelForm: LabelFormState?
     private(set) var aiRun: AIRun?
     /// Transient status line ("Copied", "Not valid JSON", …).
     private(set) var notice: String?
@@ -218,6 +255,7 @@ final class PanelViewModel {
         aiRun = nil
         snippetForm = nil
         saveSecretForm = nil
+        labelForm = nil
         actionQuery = ""
         actionSelection = 0
         mode = .browse
@@ -474,6 +512,33 @@ final class PanelViewModel {
         env.pasteSnippet(form.snippet, values: form.values, into: target)
     }
 
+    func beginLabel(_ entry: PanelEntry) {
+        selectedID = entry.id
+        switch entry {
+        case .clip(let item): labelForm = LabelFormState(target: .clip(item))
+        case .secret(let ref): labelForm = LabelFormState(target: .secret(ref))
+        case .snippet: return
+        }
+        mode = .label
+    }
+
+    func submitLabel() {
+        guard let form = labelForm else { return }
+        switch form.target {
+        case .clip(let item):
+            env.store.setLabel(form.text, for: item)
+            showNotice(item.label == nil ? "Label removed" : "Labelled and pinned")
+        case .secret(let ref):
+            let name = form.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return }
+            env.secrets.rename(ref, to: name)
+        }
+        let id = selectedID
+        resetMode()
+        refresh()
+        selectedID = id
+    }
+
     func beginSaveSecret(_ item: ClipItem) {
         selectedID = PanelEntry.clip(item).id
         saveSecretForm = SaveSecretState(item: item)
@@ -530,11 +595,13 @@ final class PanelViewModel {
                 actions += env.prefs.customPrompts.map { PanelAction.ai(.custom($0)) }
                 actions.append(.saveAsSecret)
             }
+            actions.append(.setLabel)
             actions.append(.togglePin)
         case .snippet:
             break
         case .secret:
             actions.append(.copy)
+            actions.append(.setLabel)
         }
         if let slot = env.slots.slot(for: entry.slotTarget) {
             actions.append(.clearSlot(slot))
@@ -595,6 +662,8 @@ final class PanelViewModel {
         case .saveAsSecret:
             guard let item = entry.clip else { return }
             beginSaveSecret(item)
+        case .setLabel:
+            beginLabel(entry)
         case .clearSlot(let number):
             env.slots.clear(number)
             mode = .browse
@@ -698,7 +767,7 @@ final class PanelViewModel {
         switch mode {
         case .browse: handleBrowseKey(event)
         case .actions: handleActionKey(event)
-        case .snippetForm, .saveSecret: handleFormKey(event)
+        case .snippetForm, .saveSecret, .label: handleFormKey(event)
         case .ai: handleAIKey(event)
         }
     }
@@ -811,7 +880,11 @@ final class PanelViewModel {
             resetMode()
             return true
         case KeyCode.returnKey, KeyCode.keypadEnter:
-            if mode == .saveSecret { submitSaveSecret() } else { submitSnippetForm() }
+            switch mode {
+            case .saveSecret: submitSaveSecret()
+            case .label: submitLabel()
+            default: submitSnippetForm()
+            }
             return true
         default:
             return false

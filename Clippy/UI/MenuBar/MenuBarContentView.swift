@@ -34,6 +34,8 @@ struct MenuBarContentView: View {
     @State private var search = ""
     @State private var confirmClear = false
     @State private var savingSecret: ClipItem?
+    @State private var labelling: ClipItem?
+    @State private var labelText = ""
     @State private var secretName = ""
     @FocusState private var secretNameFocused: Bool
     @FocusState private var searchFocused: Bool
@@ -84,7 +86,9 @@ struct MenuBarContentView: View {
             }
 
             Divider()
-            if let item = savingSecret {
+            if let item = labelling {
+                labelBar(item)
+            } else if let item = savingSecret {
                 saveSecretBar(item)
             } else if confirmClear {
                 clearConfirmation
@@ -97,6 +101,7 @@ struct MenuBarContentView: View {
         .onDisappear {
             confirmClear = false
             savingSecret = nil
+            labelling = nil
         }
     }
 
@@ -144,6 +149,12 @@ struct MenuBarContentView: View {
                 Button("Copy") { env.paste.copy(item) }
                 Divider()
                 Button(item.isPinned ? "Unpin" : "Pin") { env.store.togglePin(item) }
+                Button(item.label == nil ? "Label…" : "Edit Label…") {
+                    confirmClear = false
+                    savingSecret = nil
+                    labelText = item.label ?? ""
+                    labelling = item
+                }
                 if item.kind.isTextual {
                     Button("Save as Secret…") {
                         confirmClear = false
@@ -161,6 +172,33 @@ struct MenuBarContentView: View {
                 Button("Delete", role: .destructive) { env.store.delete(item) }
             }
         }
+    }
+
+    private func labelBar(_ item: ClipItem) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Label — labelled items are pinned and never expire")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                TextField("Label", text: $labelText, prompt: Text("e.g. Staging DB host"))
+                    .textFieldStyle(.roundedBorder)
+                    .focused($secretNameFocused)
+                    .onSubmit { saveLabel(item) }
+                Button("Cancel") { labelling = nil }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") { saveLabel(item) }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .onAppear { secretNameFocused = true }
+    }
+
+    private func saveLabel(_ item: ClipItem) {
+        env.store.setLabel(labelText, for: item)
+        labelling = nil
     }
 
     private func saveSecretBar(_ item: ClipItem) -> some View {
@@ -259,10 +297,20 @@ private struct MenuBarRow: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 ClipIconView(item: item, size: 22)
-                Text(item.preview.isEmpty ? item.kind.displayName : item.preview)
-                    .lineLimit(2)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 1) {
+                    if let label = item.label {
+                        Text(label).fontWeight(.semibold).lineLimit(1)
+                        Text(item.preview.isEmpty ? item.kind.displayName : item.preview)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    } else {
+                        Text(item.preview.isEmpty ? item.kind.displayName : item.preview)
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 if item.isPinned {
                     Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary)
                 }

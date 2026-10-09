@@ -68,6 +68,17 @@ final class ClipStore {
         commit()
     }
 
+    /// Sets (or clears, for empty text) a label. Labelled items are pinned so they never expire.
+    func setLabel(_ label: String?, for item: ClipItem) {
+        let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        item.label = trimmed.isEmpty ? nil : trimmed
+        if item.label != nil && !item.isPinned {
+            item.isPinned = true
+            item.pinnedAt = .now
+        }
+        commit()
+    }
+
     func togglePin(_ item: ClipItem) {
         item.isPinned.toggle()
         item.pinnedAt = item.isPinned ? .now : nil
@@ -159,7 +170,8 @@ final class ClipStore {
 
     // MARK: Retention
 
-    /// Pinned items are exempt from both limits. `maxAge == nil` means keep forever.
+    /// Pinned items are exempt from both limits. `maxAge == nil` keeps forever; `maxItems == 0`
+    /// means no count limit.
     func enforceRetention(maxItems: Int, maxAge: TimeInterval?, now: Date = .now) {
         var removed = 0
 
@@ -174,14 +186,16 @@ final class ClipStore {
             }
         }
 
-        var overflow = FetchDescriptor<ClipItem>(
-            predicate: #Predicate { $0.isPinned == false },
-            sortBy: [SortDescriptor(\.lastCopiedAt, order: .reverse)]
-        )
-        overflow.fetchOffset = max(0, maxItems)
-        for item in (try? context.fetch(overflow)) ?? [] {
-            remove(item)
-            removed += 1
+        if maxItems > 0 {
+            var overflow = FetchDescriptor<ClipItem>(
+                predicate: #Predicate { $0.isPinned == false },
+                sortBy: [SortDescriptor(\.lastCopiedAt, order: .reverse)]
+            )
+            overflow.fetchOffset = maxItems
+            for item in (try? context.fetch(overflow)) ?? [] {
+                remove(item)
+                removed += 1
+            }
         }
 
         if removed > 0 {

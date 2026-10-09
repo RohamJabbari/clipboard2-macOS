@@ -37,7 +37,8 @@ Accessibility → Clippy). Without it Clippy copies the item and you press ⌘V 
 **Secrets** are for things like a database password you paste many times a day. Add them in
 Settings → Secrets, or select a copied value in the panel and choose ⌘K → Save as Secret
 (which also removes it from history). Pasting asks for Touch ID once per unlock window
-(default 15 min, ends on sleep/lock), marks the clipboard as concealed so no clipboard
+(default 15 min, ends on sleep/lock); "Leave Unlocked For…" (15 min – 1 week) unlocks
+once with Touch ID and survives sleep/lock until it runs out or you press Lock Now, marks the clipboard as concealed so no clipboard
 manager records it, and clears it again after 30 s. Bind a secret to a quick slot and give
 the slot a global shortcut to paste it from any app without opening the panel.
 
@@ -103,8 +104,11 @@ Design notes:
   (prefilled with 1Password, Bitwarden, Keychain Access, Passwords).
 - **Dedupe:** text and rich text share a hash namespace, so the same words with or without
   formatting are one item; recopying bumps `lastCopiedAt` and keeps the richer formats.
-- **Retention:** max items (default 500) and max age (default 30 days); pinned and
-  slot-bound items are exempt. Runs after each capture and every 30 minutes.
+- **Retention:** max age (15 min – 1 year or never, default 30 days, counted from the last
+  copy) and max items (default 500, or unlimited); pinned, labelled and slot-bound items
+  and secrets are exempt. Runs after each capture and every minute.
+- **Labels:** pinned items can carry a label shown above their value and matched by search;
+  labelling pins. Secrets show their name and a masked value with Touch ID "Show".
 - **Non-activating panel:** the frontmost app keeps focus, so ⌘V lands where you were typing.
 - **Concurrency:** default MainActor isolation (Swift 6.2); hashing and image work run
   `@concurrent` off the main actor; nothing blocks the main thread on capture.

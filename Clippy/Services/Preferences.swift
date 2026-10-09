@@ -53,7 +53,8 @@ nonisolated struct CustomPrompt: Codable, Hashable, Identifiable, Sendable {
 final class Preferences {
     nonisolated enum Key {
         static let maxItems = "maxItems"
-        static let maxAgeDays = "maxAgeDays"
+        static let maxAgeDays = "maxAgeDays"            // legacy, migrated into maxAgeMinutes
+        static let maxAgeMinutes = "maxAgeMinutes"
         static let isPaused = "isPaused"
         static let appearance = "appearance"
         static let panelSize = "panelSize"
@@ -76,13 +77,26 @@ final class Preferences {
     /// 0 means "never clear".
     static let secretClearChoices = [15, 30, 60, 120, 0]
     /// 0 means "keep forever".
-    static let maxAgeChoices = [1, 7, 30, 90, 365, 0]
-    static let maxItemChoices = [100, 250, 500, 1000, 2500, 5000]
+    /// Minutes; 0 means "keep forever".
+    static let maxAgeChoices = [15, 60, 480, 1_440, 10_080, 43_200, 129_600, 525_600, 0]
+    /// 0 means "no count limit" (only the age limit applies).
+    static let maxItemChoices = [100, 250, 500, 1000, 2500, 5000, 0]
+
+    static func describeAge(minutes: Int) -> String {
+        switch minutes {
+        case 0: "Never"
+        case ..<60: "\(minutes) minutes"
+        case 60: "1 hour"
+        case ..<1_440: "\(minutes / 60) hours"
+        case 1_440: "1 day"
+        default: "\(minutes / 1_440) days"
+        }
+    }
 
     @ObservationIgnored private let defaults: UserDefaults
 
     var maxItems: Int { didSet { defaults.set(maxItems, forKey: Key.maxItems) } }
-    var maxAgeDays: Int { didSet { defaults.set(maxAgeDays, forKey: Key.maxAgeDays) } }
+    var maxAgeMinutes: Int { didSet { defaults.set(maxAgeMinutes, forKey: Key.maxAgeMinutes) } }
     var isPaused: Bool { didSet { defaults.set(isPaused, forKey: Key.isPaused) } }
     var appearance: AppearanceMode { didSet { defaults.set(appearance.rawValue, forKey: Key.appearance) } }
     var panelSize: PanelSize { didSet { defaults.set(panelSize.rawValue, forKey: Key.panelSize) } }
@@ -105,7 +119,6 @@ final class Preferences {
         self.defaults = defaults
         defaults.register(defaults: [
             Key.maxItems: 500,
-            Key.maxAgeDays: 30,
             Key.isPaused: false,
             Key.appearance: AppearanceMode.system.rawValue,
             Key.panelSize: PanelSize.regular.rawValue,
@@ -114,8 +127,15 @@ final class Preferences {
             Key.secretGraceMinutes: 15,
             Key.secretClearSeconds: 30,
         ])
-        maxItems = max(10, defaults.integer(forKey: Key.maxItems))
-        maxAgeDays = max(0, defaults.integer(forKey: Key.maxAgeDays))
+        let storedMax = defaults.integer(forKey: Key.maxItems)
+        maxItems = storedMax == 0 ? 0 : max(10, storedMax)
+        if defaults.object(forKey: Key.maxAgeMinutes) != nil {
+            maxAgeMinutes = max(0, defaults.integer(forKey: Key.maxAgeMinutes))
+        } else if defaults.object(forKey: Key.maxAgeDays) != nil {
+            maxAgeMinutes = max(0, defaults.integer(forKey: Key.maxAgeDays)) * 1_440
+        } else {
+            maxAgeMinutes = 43_200   // 30 days
+        }
         isPaused = defaults.bool(forKey: Key.isPaused)
         appearance = AppearanceMode(rawValue: defaults.string(forKey: Key.appearance) ?? "") ?? .system
         panelSize = PanelSize(rawValue: defaults.string(forKey: Key.panelSize) ?? "") ?? .regular
@@ -137,7 +157,7 @@ final class Preferences {
     }
 
     var maxAge: TimeInterval? {
-        maxAgeDays > 0 ? TimeInterval(maxAgeDays) * 86_400 : nil
+        maxAgeMinutes > 0 ? TimeInterval(maxAgeMinutes) * 60 : nil
     }
 
     /// The selected model for the active provider (falls back to the provider's default).

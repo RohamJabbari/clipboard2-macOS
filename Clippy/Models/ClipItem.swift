@@ -52,6 +52,8 @@ final class ClipItem {
     var sourceBundleID: String?
     var sourceAppName: String?
     var isPinned: Bool = false
+    /// User-chosen name for pinned items ("Prod DB host"); the content stays in `text`.
+    var label: String?
     var pinnedAt: Date?
     var copyCount: Int = 1
 
@@ -87,8 +89,18 @@ final class ClipItem {
         return AppRef(bundleID: sourceBundleID, name: sourceAppName ?? sourceBundleID)
     }
 
-    /// Text used for searching and for text transforms.
+    /// Row title: the label if there is one, otherwise the content excerpt.
+    var displayTitle: String {
+        if let label, !label.isEmpty { return label }
+        return preview.isEmpty ? kind.displayName : preview
+    }
+
+    /// Text used for searching.
     var searchableText: String {
+        (label.map { $0 + " " } ?? "") + contentSearchText
+    }
+
+    private var contentSearchText: String {
         switch kind {
         case .image: "Image \(imageWidth)×\(imageHeight)"
         case .file: fileURLs.map(\.lastPathComponent).joined(separator: " ") + " " + text
@@ -96,10 +108,17 @@ final class ClipItem {
         }
     }
 
+    /// When this item will be removed by the age limit, or nil if it never expires.
+    func expiryDate(maxAge: TimeInterval?) -> Date? {
+        guard !isPinned, let maxAge else { return nil }
+        return lastCopiedAt.addingTimeInterval(maxAge)
+    }
+
     var accessibilityDescription: String {
         let app = sourceAppName.map { ", from \($0)" } ?? ""
         let pin = isPinned ? ", pinned" : ""
-        return "\(kind.displayName): \(preview)\(app)\(pin)"
+        let name = label.map { "\($0), " } ?? ""
+        return "\(name)\(kind.displayName): \(preview)\(app)\(pin)"
     }
 }
 

@@ -454,6 +454,7 @@ struct SecretsSettingsView: View {
     @State private var editing: SecretRef?
     @State private var editValue = ""
     @State private var confirmDelete: SecretRef?
+    @State private var revealed: [String: String] = [:]
 
     var body: some View {
         @Bindable var prefs = env.prefs
@@ -471,6 +472,24 @@ struct SecretsSettingsView: View {
                             set: { env.secrets.rename(ref, to: $0) }
                         ))
                         .labelsHidden()
+                        Text(revealed[ref.id] ?? "••••••••")
+                            .font(.body.monospaced())
+                            .foregroundStyle(revealed[ref.id] == nil ? .secondary : .primary)
+                            .textSelection(.enabled)
+                            .lineLimit(1)
+                            .frame(maxWidth: 180, alignment: .leading)
+                        Button {
+                            if revealed[ref.id] != nil {
+                                revealed[ref.id] = nil
+                            } else {
+                                Task { revealed[ref.id] = await env.secrets.reveal(ref, reason: "show “\(ref.name)”") }
+                            }
+                        } label: {
+                            Image(systemName: revealed[ref.id] == nil ? "eye" : "eye.slash")
+                        }
+                        .buttonStyle(.borderless)
+                        .help(revealed[ref.id] == nil ? "Show value (Touch ID)" : "Hide value")
+                        .accessibilityLabel(revealed[ref.id] == nil ? "Show \(ref.name)" : "Hide \(ref.name)")
                         if let slot = env.slots.slot(for: .secret(ref.id)) {
                             Text("⌘\(slot)").font(.caption.monospacedDigit()).foregroundStyle(.tint)
                         }
@@ -523,12 +542,13 @@ struct SecretsSettingsView: View {
                 Text("The unlock window ends when your Mac sleeps or locks. Pasted secrets are marked concealed, so clipboard managers don't record them.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if env.secrets.isUnlocked {
-                    Button("Lock Now") { env.secrets.lock() }
+                LabeledContent("Unlock") {
+                    SecretUnlockControl(secrets: env.secrets)
                 }
             }
         }
         .formStyle(.grouped)
+        .onDisappear { revealed = [:] }
         .sheet(item: $editing) { ref in
             VStack(alignment: .leading, spacing: 14) {
                 Text("New value for “\(ref.name)”").font(.headline)

@@ -72,3 +72,30 @@ extension Date {
         return formatted(.relative(presentation: .numeric, unitsStyle: .abbreviated))
     }
 }
+
+/// "Leave Unlocked For…" menu, or the remaining unlock time with a Lock Now button.
+struct SecretUnlockControl: View {
+    let secrets: SecretStore
+
+    var body: some View {
+        // Re-render every 30 s so the countdown and expiry stay current.
+        TimelineView(.periodic(from: .now, by: 30)) { _ in
+            if secrets.isManuallyUnlocked, let until = secrets.unlockedUntil {
+                HStack(spacing: 8) {
+                    Label("Unlocked until \(until.formatted(until.timeIntervalSinceNow > 82_800 ? .dateTime.weekday().hour().minute() : .dateTime.hour().minute()))",
+                          systemImage: "lock.open.fill")
+                        .foregroundStyle(.secondary)
+                    Button("Lock Now") { secrets.lock() }
+                }
+            } else {
+                Menu("Leave Unlocked For…") {
+                    ForEach(UnlockDuration.allCases) { duration in
+                        Button(duration.title) { Task { await secrets.unlock(for: duration) } }
+                    }
+                }
+                .fixedSize()
+                .help("Confirm once with Touch ID, then paste secrets without being asked until the time runs out")
+            }
+        }
+    }
+}

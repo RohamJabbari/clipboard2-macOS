@@ -159,6 +159,44 @@ struct SaveSecretView: View {
     }
 }
 
+/// Label for a pinned item, or the name of a secret. Shows the value it belongs to.
+struct LabelFormView: View {
+    @Bindable var form: LabelFormState
+    let onSubmit: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(form.isSecret ? "Rename Secret" : "Label", systemImage: "tag")
+                .font(.headline)
+            Text(form.isSecret
+                 ? "The name shown for this secret in the panel and in search."
+                 : "Shown instead of the content in lists and searchable. Labelled items are pinned, so they never expire. Leave empty to remove the label.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Form {
+                TextField("Label", text: $form.text, prompt: Text("e.g. Staging DB host"))
+                    .focused($focused)
+                LabeledContent("Value") {
+                    Text(form.valuePreview)
+                        .lineLimit(2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            HStack {
+                Spacer()
+                Button("Save", action: onSubmit)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+        .onAppear { focused = true }
+    }
+}
+
 /// Streaming AI output with Paste / Copy / Replace actions.
 struct AIResultView: View {
     let run: AIRun

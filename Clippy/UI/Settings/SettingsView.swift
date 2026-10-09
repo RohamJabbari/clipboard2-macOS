@@ -72,14 +72,14 @@ struct GeneralSettingsView: View {
 
             Section("History") {
                 Picker("Keep up to", selection: $prefs.maxItems) {
-                    ForEach(Preferences.maxItemChoices, id: \.self) { Text("\($0) items").tag($0) }
+                    ForEach(Preferences.maxItemChoices, id: \.self) { Text($0 == 0 ? "Unlimited" : "\($0) items").tag($0) }
                 }
-                Picker("Delete items older than", selection: $prefs.maxAgeDays) {
-                    ForEach(Preferences.maxAgeChoices, id: \.self) { days in
-                        Text(days == 0 ? "Never" : days == 1 ? "1 day" : "\(days) days").tag(days)
+                Picker("Delete items after", selection: $prefs.maxAgeMinutes) {
+                    ForEach(Preferences.maxAgeChoices, id: \.self) { minutes in
+                        Text(Preferences.describeAge(minutes: minutes)).tag(minutes)
                     }
                 }
-                Text("Pinned items are never deleted automatically.")
+                Text("Measured from the last time an item was copied. Pinned and labelled items and secrets never expire.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 LabeledContent("Stored items", value: "\(env.store.count())")
@@ -89,7 +89,7 @@ struct GeneralSettingsView: View {
         }
         .formStyle(.grouped)
         .onChange(of: prefs.maxItems) { env.runMaintenance() }
-        .onChange(of: prefs.maxAgeDays) { env.runMaintenance() }
+        .onChange(of: prefs.maxAgeMinutes) { env.runMaintenance() }
         .task {
             while !Task.isCancelled {
                 axTrusted = AXPermission.isTrusted
