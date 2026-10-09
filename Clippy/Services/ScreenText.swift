@@ -20,6 +20,11 @@ nonisolated enum ScreenTextCapture {
     /// Recognises text in reading order (top to bottom, then left to right), one line per row.
     @concurrent
     static func recognizeText(in image: CGImage) async throws -> String {
+        try recognizeTextNow(in: image)
+    }
+
+    /// Synchronous variant for the Services menu, whose API requires an immediate answer.
+    static func recognizeTextNow(in image: CGImage) throws -> String {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true

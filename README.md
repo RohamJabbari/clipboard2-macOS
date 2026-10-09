@@ -52,7 +52,7 @@ API keys/secrets), because those grants are tied to the signing certificate.
 | Multi-select | **⌘-click** toggles, **⇧-click** selects a range, **⇧↑/⇧↓** extend, **⌘A** selects all (empty search); Return pastes them all, text joined by line breaks |
 | Selected text, any app | **⌥⌘K**: transform it or ask AI; Return replaces the selection (also right-click → Services → Clippy Actions…) |
 | Text from screen | **⌥⇧⌘2**: drag over anything; the text is recognised on-device and pasted |
-| Paste as text | **⌥⇧⌘V**: plain text; if the clipboard holds an image or screenshot, the text in it (on-device OCR). Clipboard is restored afterwards |
+| Paste as text | **⌥⇧⌘V**: plain text; if the clipboard holds an image or screenshot, the text in it (on-device OCR). Clipboard is restored afterwards. In native apps also Services → *Paste Text from Clipboard Image* |
 | Other | **⌘P** pin, **⌫** delete (history only), **Tab** cycles filters, **Esc** closes |
 
 Filters: All, Pinned, Text, Images, Files, Snippets, Secrets, This App (items copied from the

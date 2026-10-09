@@ -53,6 +53,12 @@ targets:
             NSPortName: Clippy
             NSSendTypes: [public.utf8-plain-text, NSStringPboardType]
             NSRequiredContext: {}
+          - NSMenuItem:
+              default: Paste Text from Clipboard Image
+            NSMessage: pasteTextFromImage
+            NSPortName: Clippy
+            NSReturnTypes: [public.utf8-plain-text, NSStringPboardType]
+            NSRequiredContext: {}
     entitlements:
       path: Clippy/Clippy.entitlements
       properties:
