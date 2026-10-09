@@ -65,6 +65,7 @@ final class Preferences {
         static let customBaseURL = "customBaseURL"
         static let secretGraceMinutes = "secretGraceMinutes"
         static let secretClearSeconds = "secretClearSeconds"
+        static let dedupeVersion = "dedupeVersion"
         static let customPrompts = "customPrompts"
         static let hasLaunchedBefore = "hasLaunchedBefore"
         static let hasShownAccessibilityOnboarding = "hasShownAccessibilityOnboarding"
@@ -93,6 +94,7 @@ final class Preferences {
     var customBaseURL: String { didSet { defaults.set(customBaseURL, forKey: Key.customBaseURL) } }
     var secretGraceMinutes: Int { didSet { defaults.set(secretGraceMinutes, forKey: Key.secretGraceMinutes) } }
     var secretClearSeconds: Int { didSet { defaults.set(secretClearSeconds, forKey: Key.secretClearSeconds) } }
+    var dedupeVersion: Int { didSet { defaults.set(dedupeVersion, forKey: Key.dedupeVersion) } }
     var customPrompts: [CustomPrompt] { didSet { store(customPrompts, Key.customPrompts) } }
     var hasLaunchedBefore: Bool { didSet { defaults.set(hasLaunchedBefore, forKey: Key.hasLaunchedBefore) } }
     var hasShownAccessibilityOnboarding: Bool {
@@ -128,6 +130,7 @@ final class Preferences {
         customBaseURL = defaults.string(forKey: Key.customBaseURL) ?? AIProviderKind.custom.defaultBaseURL
         secretGraceMinutes = max(0, defaults.integer(forKey: Key.secretGraceMinutes))
         secretClearSeconds = max(0, defaults.integer(forKey: Key.secretClearSeconds))
+        dedupeVersion = defaults.integer(forKey: Key.dedupeVersion)
         customPrompts = Self.load([CustomPrompt].self, defaults, Key.customPrompts) ?? []
         hasLaunchedBefore = defaults.bool(forKey: Key.hasLaunchedBefore)
         hasShownAccessibilityOnboarding = defaults.bool(forKey: Key.hasShownAccessibilityOnboarding)

@@ -66,6 +66,16 @@ final class AppEnvironment {
     // MARK: Lifecycle
 
     func start() {
+        monitor.shouldDiscard = { [weak self] capture in
+            guard let self, capture.kind.isTextual else { return false }
+            return self.secrets.valueHashes.contains(capture.hash)
+        }
+        secrets.onChange = { [weak self] in
+            guard let self else { return }
+            self.store.removeUnpinned(matching: self.secrets.valueHashes)
+        }
+        store.removeUnpinned(matching: secrets.valueHashes)
+        migrateDedupeIfNeeded()
         applyAppearance()
         monitor.start()
         runMaintenance()
@@ -101,6 +111,22 @@ final class AppEnvironment {
 
     func showAccessibilityOnboarding() {
         onboarding.show()
+    }
+
+    /// One-time: re-hash existing history with the current rules and merge duplicates.
+    private func migrateDedupeIfNeeded() {
+        let currentVersion = 2
+        guard prefs.dedupeVersion < currentVersion else { return }
+        let images = store.allItems().compactMap { item -> (id: UUID, url: URL)? in
+            guard item.kind == .image, let file = item.imageFile else { return nil }
+            return (item.id, blobs.url(for: file))
+        }
+        Task {
+            let hashes = await DedupeMigration.pixelHashes(for: images)
+            store.applyHashes(images: hashes)
+            store.mergeDuplicates()
+            prefs.dedupeVersion = currentVersion
+        }
     }
 
     func runMaintenance() {

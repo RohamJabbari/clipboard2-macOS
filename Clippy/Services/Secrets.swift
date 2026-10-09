@@ -86,6 +86,9 @@ nonisolated enum SecretVault {
 final class SecretStore {
     private(set) var secrets: [SecretRef] = []
     private(set) var revision = 0
+    /// Content hashes of secret values (never the values), so matching copies stay out of history.
+    @ObservationIgnored private(set) var valueHashes: Set<String> = []
+    @ObservationIgnored var onChange: (() -> Void)?
     @ObservationIgnored private var lastAuthentication: Date?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private let prefs: Preferences
@@ -106,7 +109,9 @@ final class SecretStore {
 
     func reload() {
         secrets = SecretVault.list()
+        valueHashes = Set(secrets.compactMap { SecretVault.value(id: $0.id).map(ContentHasher.hash(text:)) })
         revision &+= 1
+        onChange?()
     }
 
     @discardableResult
@@ -123,6 +128,7 @@ final class SecretStore {
 
     func setValue(_ value: String, for ref: SecretRef) {
         SecretVault.update(id: ref.id, value: value)
+        reload()
     }
 
     func delete(_ ref: SecretRef) {

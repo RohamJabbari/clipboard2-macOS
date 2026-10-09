@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import SwiftData
+import AppKit
 @testable import Clippy
 
 @MainActor
@@ -41,8 +42,62 @@ struct StoreTests {
 
     @Test func differentTextIsNotDeduped() {
         store.ingest(.text("a"))
-        store.ingest(.text("a "))
-        #expect(store.count() == 2)
+        store.ingest(.text("b"))
+        store.ingest(.text("a b"))
+        #expect(store.count() == 3)
+    }
+
+    @Test func surroundingWhitespaceIsIgnoredForDedupe() {
+        store.ingest(.text("hello"))
+        store.ingest(.text("  hello\n"))
+        #expect(store.count() == 1)
+    }
+
+    @Test func mergeDuplicatesKeepsNewestUnpinnedAndSumsCounts() {
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        let old = store.ingest(.text("dup"), now: t0)
+        let new = store.ingest(.text("other"), now: t0.addingTimeInterval(5))
+        new.contentHash = old.contentHash          // simulate legacy duplicates
+        #expect(store.mergeDuplicates() == 1)
+        let remaining = store.allItems()
+        #expect(remaining.count == 1)
+        #expect(remaining.first?.id == new.id)
+        #expect(remaining.first?.copyCount == 2)
+    }
+
+    @Test func mergeDuplicatesNeverDeletesPinned() {
+        let pinned = store.ingest(.text("p"), now: Date(timeIntervalSince1970: 1))
+        store.togglePin(pinned)
+        let newer = store.ingest(.text("q"), now: Date(timeIntervalSince1970: 50))
+        newer.contentHash = pinned.contentHash
+        store.mergeDuplicates()
+        let remaining = store.allItems()
+        #expect(remaining.map(\.id) == [pinned.id])
+        #expect(remaining.first?.lastCopiedAt == Date(timeIntervalSince1970: 50))
+    }
+
+    @Test func removeUnpinnedMatchingSecretHashes() {
+        let secretCopy = store.ingest(.text("hunter2"))
+        let pinnedCopy = store.ingest(.text("pinned-secret"))
+        store.togglePin(pinnedCopy)
+        store.ingest(.text("normal"))
+        store.removeUnpinned(matching: [secretCopy.contentHash, pinnedCopy.contentHash])
+        #expect(Set(store.allItems().map(\.text)) == ["pinned-secret", "normal"])
+    }
+
+    @Test func samePixelsDifferentEncodingsHashEqual() throws {
+        let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let ctx = try #require(CGContext(data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 32, space: space,
+                                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        ctx.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: 4, height: 8))
+        let image = try #require(ctx.makeImage())
+        let png = try #require(ImageProcessor.encodePNG(image))
+        let tiff = try #require(NSBitmapImageRep(cgImage: image).representation(using: .tiff, properties: [:]))
+        #expect(png != tiff)
+        let a = try #require(ImageProcessor.process(png)?.pixelHash)
+        let b = try #require(ImageProcessor.process(tiff)?.pixelHash)
+        #expect(a == b)
     }
 
     @Test func dedupeUpdatesSourceApp() {

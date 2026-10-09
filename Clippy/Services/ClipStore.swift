@@ -108,6 +108,55 @@ final class ClipStore {
         commit()
     }
 
+    // MARK: Duplicates
+
+    /// Recomputes text hashes (after a hashing change) and applies precomputed image hashes.
+    func applyHashes(images: [UUID: String]) {
+        for item in allItems() {
+            if item.kind.isTextual {
+                item.contentHash = ContentHasher.hash(text: item.text)
+            } else if let hash = images[item.id] {
+                item.contentHash = hash
+            }
+        }
+        commit()
+    }
+
+    /// Collapses items with the same content. Pinned items are never deleted; otherwise the most
+    /// recently copied one survives and inherits the group's copy count.
+    @discardableResult
+    func mergeDuplicates() -> Int {
+        var removed = 0
+        for (_, items) in Dictionary(grouping: allItems(), by: \.contentHash) where items.count > 1 {
+            let pinned = items.filter(\.isPinned)
+            guard let newest = items.max(by: { $0.lastCopiedAt < $1.lastCopiedAt }) else { continue }
+            let keepers = pinned.isEmpty ? [newest] : pinned
+            guard let survivor = keepers.max(by: { $0.lastCopiedAt < $1.lastCopiedAt }) else { continue }
+            survivor.lastCopiedAt = newest.lastCopiedAt
+            survivor.copyCount = items.reduce(0) { $0 + $1.copyCount }
+            for item in items where !keepers.contains(where: { $0.id == item.id }) {
+                remove(item)
+                removed += 1
+            }
+        }
+        if removed > 0 {
+            Log.store.info("Merged \(removed) duplicate items")
+            commit()
+        }
+        return removed
+    }
+
+    /// Removes unpinned history items whose text matches one of `hashes` (e.g. saved secrets).
+    func removeUnpinned(matching hashes: Set<String>) {
+        guard !hashes.isEmpty else { return }
+        var removed = 0
+        for item in allItems() where !item.isPinned && hashes.contains(item.contentHash) {
+            remove(item)
+            removed += 1
+        }
+        if removed > 0 { commit() }
+    }
+
     // MARK: Retention
 
     /// Pinned items are exempt from both limits. `maxAge == nil` means keep forever.

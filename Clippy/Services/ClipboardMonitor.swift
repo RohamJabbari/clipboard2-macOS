@@ -81,6 +81,8 @@ final class ClipboardMonitor {
     @ObservationIgnored private var lastChangeCount = 0
 
     private(set) var captureCount = 0
+    /// Lets the app veto a processed capture (e.g. text that equals a saved secret).
+    @ObservationIgnored var shouldDiscard: ((ProcessedCapture) -> Bool)?
 
     init(store: ClipStore, prefs: Preferences, tracker: FrontmostAppTracker, blobs: BlobStore, pasteboard: NSPasteboard = .general) {
         self.store = store
@@ -134,6 +136,11 @@ final class ClipboardMonitor {
         Task { [weak self] in
             guard let processed = await CaptureProcessor.process(raw, blobs: blobs) else { return }
             guard let self else { return }
+            if self.shouldDiscard?(processed) == true {
+                blobs.delete(processed.imageFile)
+                blobs.delete(processed.thumbnailFile)
+                return
+            }
             self.store.ingest(processed)
             self.store.enforceRetention(maxItems: self.prefs.maxItems, maxAge: self.prefs.maxAge)
             self.captureCount += 1
