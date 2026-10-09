@@ -137,3 +137,29 @@ struct SecretVaultTests {
         #expect(SecretVault.value(id: ref.id) == nil)
     }
 }
+
+struct ClaudeAccountTests {
+    @Test func parsesSignedOutStatus() {
+        let json = #"{"loggedIn": false, "authMethod": "none", "apiProvider": "firstParty"}"#
+        #expect(ClaudeCodeAccount.parseStatus(json) == .signedOut)
+    }
+
+    @Test func parsesSignedInStatusWithEmailAndNoise() {
+        let output = "warning: something\n{\"loggedIn\": true, \"authMethod\": \"claudeai\", \"email\": \"admin@softmaze.at\"}\n"
+        #expect(ClaudeCodeAccount.parseStatus(output) == .signedIn(account: "admin@softmaze.at"))
+    }
+
+    @Test func garbageIsNotAStatus() {
+        #expect(ClaudeCodeAccount.parseStatus("command not found") == nil)
+    }
+
+    @Test func extractsHTTPSLoginURL() {
+        let line = "Browser didn't open? Use: https://claude.ai/oauth/authorize?code=true&client_id=x"
+        #expect(ClaudeCodeAccount.firstURL(in: line)?.host() == "claude.ai")
+        #expect(ClaudeCodeAccount.firstURL(in: "no url here") == nil)
+    }
+
+    @Test func notLoggedInMapsToSignInError() {
+        #expect(AIError.notSignedIn.needsSettings)
+    }
+}

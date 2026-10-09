@@ -81,15 +81,15 @@ struct MenuBarContentView: View {
             }
 
             Divider()
-            footer
+            if confirmClear {
+                clearConfirmation
+            } else {
+                footer
+            }
         }
         .frame(width: 380, height: 520)
         .onAppear { searchFocused = true }
-        .confirmationDialog("Clear clipboard history?", isPresented: $confirmClear) {
-            Button("Clear History", role: .destructive) { env.store.clearHistory() }
-        } message: {
-            Text("Pinned items are kept.")
-        }
+        .onDisappear { confirmClear = false }
     }
 
     private var searchField: some View {
@@ -136,9 +136,37 @@ struct MenuBarContentView: View {
                 Button("Copy") { env.paste.copy(item) }
                 Divider()
                 Button(item.isPinned ? "Unpin" : "Pin") { env.store.togglePin(item) }
+                Menu("Assign to Quick Slot") {
+                    ForEach(QuickSlots.range, id: \.self) { n in
+                        Button("⌘\(n)\(env.slots.title(for: n).map { " — " + $0 } ?? "")") {
+                            env.slots.assign(.clip(item), to: n)
+                        }
+                    }
+                }
                 Button("Delete", role: .destructive) { env.store.delete(item) }
             }
         }
+    }
+
+    /// Inline instead of a dialog: a modal sheet steals focus from the menu bar window,
+    /// which closes the popover before the click lands.
+    private var clearConfirmation: some View {
+        HStack(spacing: 8) {
+            Text("Clear history? Pinned items are kept.")
+                .font(.callout)
+                .lineLimit(1)
+            Spacer()
+            Button("Cancel") { confirmClear = false }
+                .keyboardShortcut(.cancelAction)
+            Button("Clear", role: .destructive) {
+                env.store.clearHistory()
+                confirmClear = false
+            }
+            .keyboardShortcut(.defaultAction)
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
     }
 
     private var footer: some View {

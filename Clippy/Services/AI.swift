@@ -67,7 +67,7 @@ nonisolated enum AIProviderKind: String, CaseIterable, Codable, Identifiable, Se
         case .deepSeek: "DeepSeek"
         case .openRouter: "OpenRouter"
         case .custom: "OpenAI-Compatible (Custom)"
-        case .claudeCode: "Claude Code (Subscription)"
+        case .claudeCode: "Claude (Subscription)"
         }
     }
 
@@ -211,6 +211,7 @@ nonisolated enum AIError: LocalizedError, Equatable {
     case refusal
     case invalidResponse
     case cliNotFound
+    case notSignedIn
 
     var errorDescription: String? {
         switch self {
@@ -221,13 +222,14 @@ nonisolated enum AIError: LocalizedError, Equatable {
         case .api(let message): message
         case .refusal: "The model declined this request."
         case .invalidResponse: "Unexpected response from the API."
-        case .cliNotFound: "Couldn't find the `claude` command. Install Claude Code and run `claude` once to sign in."
+        case .cliNotFound: "Claude isn't set up yet. Open Settings → AI to install it and sign in."
+        case .notSignedIn: "Sign in with your Claude account in Settings → AI."
         }
     }
 
     var needsSettings: Bool {
         switch self {
-        case .missingAPIKey, .missingModel, .badURL, .cliNotFound: true
+        case .missingAPIKey, .missingModel, .badURL, .cliNotFound, .notSignedIn: true
         default: false
         }
     }
@@ -518,7 +520,13 @@ nonisolated struct ClaudeCodeCLIClient: AIStreamingClient {
                         case .message(let text):
                             buffered += text
                         case .result(let isError, let text):
-                            if isError { throw AIError.api(text.isEmpty ? "Claude Code reported an error." : text) }
+                            if isError {
+                                if text.localizedCaseInsensitiveContains("not logged in")
+                                    || text.localizedCaseInsensitiveContains("/login") {
+                                    throw AIError.notSignedIn
+                                }
+                                throw AIError.api(text.isEmpty ? "Claude reported an error." : text)
+                            }
                             if !streamed { continuation.yield(buffered.isEmpty ? text : buffered) }
                         case .other:
                             break
@@ -557,6 +565,12 @@ nonisolated final class ProcessBox: @unchecked Sendable {
         try process.run()
         lock.withLock { self.process = process }
         return (out.fileHandleForReading, input.fileHandleForWriting)
+    }
+
+    static func wrap(_ process: Process) -> ProcessBox {
+        let box = ProcessBox()
+        box.lock.withLock { box.process = process }
+        return box
     }
 
     func terminate() {

@@ -183,17 +183,7 @@ struct AISettingsView: View {
                     ForEach(AIProviderKind.allCases) { Text($0.title).tag($0) }
                 }
                 if provider == .claudeCode {
-                    LabeledContent("Claude Code") {
-                        if let url = ClaudeCodeCLIClient.executableURL {
-                            Label(url.path(percentEncoded: false), systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Label("Not installed", systemImage: "xmark.octagon.fill").foregroundStyle(.red)
-                        }
-                    }
-                    Text("Runs your local `claude` command, which uses your Claude Pro/Max login. No API key or API billing, but each request takes a few seconds to start. Sign in once by running `claude` in Terminal.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    ClaudeAccountRow(account: env.claudeAccount)
                 }
                 if provider.hasEditableBaseURL {
                     TextField("Base URL", text: $prefs.customBaseURL, prompt: Text("http://localhost:11434/v1"))
@@ -349,6 +339,94 @@ struct AISettingsView: View {
             } catch {
                 testState = .failed(error.localizedDescription)
             }
+        }
+    }
+}
+
+// MARK: - Claude subscription account
+
+struct ClaudeAccountRow: View {
+    let account: ClaudeCodeAccount
+    @State private var code = ""
+
+    var body: some View {
+        Group {
+            LabeledContent("Account") {
+                HStack(spacing: 8) {
+                    status
+                    actions
+                }
+            }
+            if account.state == .signingIn {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Finish signing in in your browser, then come back here.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    if let url = account.signInURL {
+                        Button("Open Sign-In Page Again") { NSWorkspace.shared.open(url) }
+                    }
+                    if account.needsCode {
+                        HStack {
+                            TextField("Code", text: $code, prompt: Text("Paste the code from the browser"))
+                            Button("Continue") {
+                                account.submitCode(code)
+                                code = ""
+                            }
+                            .disabled(code.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                    }
+                }
+            }
+            Text("Uses your Claude Pro or Max plan, with no API key and no API billing. Requests take a few seconds longer to start than with an API key.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .task { await account.refresh() }
+    }
+
+    @ViewBuilder
+    private var status: some View {
+        switch account.state {
+        case .checking:
+            ProgressView().controlSize(.small)
+        case .notInstalled:
+            Label("Not set up", systemImage: "circle.dashed").foregroundStyle(.secondary)
+        case .installing:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Installing…").foregroundStyle(.secondary)
+            }
+        case .signedOut:
+            Label("Signed out", systemImage: "person.crop.circle.badge.xmark").foregroundStyle(.secondary)
+        case .signingIn:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Waiting for browser…").foregroundStyle(.secondary)
+            }
+        case .signedIn(let name):
+            Label(name ?? "Signed in", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+        case .failed(let message):
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .lineLimit(2)
+        }
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        switch account.state {
+        case .notInstalled:
+            Button("Set Up Claude") { Task { await account.install(); if case .signedOut = account.state { account.signIn() } } }
+                .help("Installs Anthropic's Claude Code (no admin rights needed), then signs you in")
+        case .signedOut, .failed:
+            Button("Sign in with Claude") { account.signIn() }
+                .buttonStyle(.borderedProminent)
+        case .signingIn:
+            Button("Cancel") { account.cancelSignIn(); Task { await account.refresh() } }
+        case .signedIn:
+            Button("Sign Out") { Task { await account.signOut() } }
+        case .checking, .installing:
+            EmptyView()
         }
     }
 }

@@ -48,7 +48,8 @@ through the provider chosen in Settings → AI:
 
 - Anthropic (Claude API, default `claude-sonnet-5-5`)
 - OpenAI, DeepSeek, OpenRouter, any OpenAI-compatible endpoint (Ollama, LM Studio, Groq…)
-- Claude Code: runs your local `claude -p`, which uses your Claude Pro/Max login.
+- Claude (Subscription): click "Sign in with Claude" in Settings → AI (and "Set Up Claude" if
+  Claude Code isn't installed). It drives Anthropic's own Claude Code login, then runs `claude -p`.
   No API key or API billing, but slower to start. Clippy never borrows a subscription token
   itself; that would break Anthropic's terms.
 

@@ -26,6 +26,7 @@ final class AppEnvironment {
     let snippets: SnippetStore
     let secrets: SecretStore
     let slots: QuickSlots
+    let claudeAccount = ClaudeCodeAccount()
 
     @ObservationIgnored private(set) lazy var panel = QuickPanelController(env: self)
     @ObservationIgnored private let onboarding = AccessibilityOnboardingController()
