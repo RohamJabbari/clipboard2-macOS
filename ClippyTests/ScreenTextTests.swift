@@ -34,4 +34,27 @@ struct ScreenTextTests {
         ]
         #expect(ScreenTextCapture.orderedLines(lines) == "left right\nsecond")
     }
+
+    @Test func clipboardImageRules() throws {
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("ClippyTests-\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        let png = try #require(ImageProcessor.encodePNG(try render("x")))
+
+        pasteboard.clearContents()
+        pasteboard.setData(png, forType: .png)
+        #expect(ClipboardImage.current(in: pasteboard) != nil)          // screenshot / copied image
+
+        pasteboard.clearContents()
+        pasteboard.setData(png, forType: .png)
+        pasteboard.setString("A1\tB1", forType: .string)
+        #expect(ClipboardImage.current(in: pasteboard) == nil)          // spreadsheet: real text wins
+
+        let file = FileManager.default.temporaryDirectory.appending(path: "clippy-ocr-test.png")
+        try png.write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        pasteboard.clearContents()
+        pasteboard.writeObjects([file as NSURL])
+        pasteboard.setString("clippy-ocr-test.png", forType: .string)
+        #expect(ClipboardImage.current(in: pasteboard) != nil)          // Finder file copy
+    }
 }

@@ -1,8 +1,9 @@
 import AppKit
 import Vision
+import UniformTypeIdentifiers
 
-/// "Capture text from screen": the system screenshot crosshair, then on-device OCR (Vision).
-/// Nothing is uploaded; the image is deleted right after recognition.
+/// On-device text recognition (Vision) for a captured screen region or a clipboard image.
+/// Nothing is uploaded; captured screenshots are deleted right after recognition.
 nonisolated enum ScreenTextCapture {
     /// Lets the user drag a region with the standard screenshot UI. Nil if cancelled.
     static func captureRegion() async -> CGImage? {
@@ -46,5 +47,24 @@ nonisolated enum ScreenTextCapture {
             .map { $0.sorted { $0.box.minX < $1.box.minX }.map(\.text).joined(separator: " ") }
             .joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// The image on the clipboard that "Paste as text" should read: a copied image file (Finder also
+/// adds its name as text, which we ignore), or bitmap data that has no real text alongside it
+/// (apps like Excel put both a picture and the actual text; the text wins there).
+enum ClipboardImage {
+    static func current(in pasteboard: NSPasteboard) -> CGImage? {
+        let hasText = pasteboard.string(forType: .string)?.isEmpty == false
+        if !hasText, let data = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff),
+           let source = CGImageSourceCreateWithData(data as CFData, nil) {
+            return CGImageSourceCreateImageAtIndex(source, 0, nil)
+        }
+        if let url = (pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL])?.first,
+           UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true,
+           let source = CGImageSourceCreateWithURL(url as CFURL, nil) {
+            return CGImageSourceCreateImageAtIndex(source, 0, nil)
+        }
+        return nil
     }
 }

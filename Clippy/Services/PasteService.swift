@@ -120,6 +120,23 @@ final class PasteService {
         }
     }
 
+    /// Pastes `text`, then puts the previous clipboard back so the user's clipboard is unchanged.
+    /// Without Accessibility the text simply stays on the clipboard for a manual ⌘V.
+    func pastePreservingClipboard(text: String, into target: NSRunningApplication?, onRestored: @escaping () -> Void) {
+        let saved = snapshot()
+        write(text: text)
+        guard AXPermission.isTrusted else {
+            sendPasteKeystroke(to: target)      // shows the Accessibility onboarding
+            return
+        }
+        sendPasteKeystroke(to: target)
+        Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            restore(saved)
+            onRestored()
+        }
+    }
+
     func pasteSecret(_ value: String, into target: NSRunningApplication?, clearAfter seconds: Int) {
         writeSecret(value, clearAfter: seconds)
         sendPasteKeystroke(to: target)

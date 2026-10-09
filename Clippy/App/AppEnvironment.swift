@@ -6,7 +6,8 @@ import KeyboardShortcuts
 extension KeyboardShortcuts.Name {
     static let toggleQuickPanel = Self("toggleQuickPanel", default: .init(.v, modifiers: [.command, .shift]))
     static let selectionActions = Self("selectionActions", default: .init(.k, modifiers: [.command, .option]))
-    static let captureText = Self("captureText", default: .init(.two, modifiers: [.command, .shift]))
+    static let captureText = Self("captureText", default: .init(.two, modifiers: [.command, .shift, .option]))
+    static let pasteAsText = Self("pasteAsText", default: .init(.v, modifiers: [.command, .shift, .option]))
 }
 
 /// Owns every long-lived service. Created once at launch and injected into SwiftUI via `.environment`.
@@ -101,8 +102,15 @@ final class AppEnvironment {
         KeyboardShortcuts.onKeyUp(for: .selectionActions) { [weak self] in
             self?.showSelectionActions()
         }
+        // v1.0 shipped ⇧⌘2 as the default, which collides with a common screenshot remap.
+        if KeyboardShortcuts.getShortcut(for: .captureText) == .init(.two, modifiers: [.command, .shift]) {
+            KeyboardShortcuts.setShortcut(.init(.two, modifiers: [.command, .shift, .option]), for: .captureText)
+        }
         KeyboardShortcuts.onKeyUp(for: .captureText) { [weak self] in
             self?.captureScreenText()
+        }
+        KeyboardShortcuts.onKeyUp(for: .pasteAsText) { [weak self] in
+            self?.pasteClipboardAsText()
         }
         NSApp.servicesProvider = serviceProvider
         NSUpdateDynamicServices()
@@ -242,6 +250,39 @@ final class AppEnvironment {
         if alert.runModal() == .alertFirstButtonReturn,
            let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
             NSWorkspace.shared.open(url)
+        }
+    }
+
+    // MARK: Paste as text (⌥⇧⌘V)
+
+    /// Text on the clipboard → pasted as plain text. An image (screenshot, copied picture or image
+    /// file) → its text is recognised on-device and pasted. The clipboard is restored afterwards.
+    func pasteClipboardAsText() {
+        let pasteboard = NSPasteboard.general
+        let target = appTracker.targetApp
+        guard let image = ClipboardImage.current(in: pasteboard) else {
+            if let string = pasteboard.string(forType: .string), !string.isEmpty {
+                pasteKeepingClipboard(string, into: target)
+            } else {
+                NSSound.beep()
+            }
+            return
+        }
+        Task {
+            let text = (try? await ScreenTextCapture.recognizeText(in: image)) ?? ""
+            guard !text.isEmpty else {
+                NSSound.beep()
+                return
+            }
+            let source = AppRef(bundleID: Bundle.main.bundleIdentifier ?? "at.softmaze.Clippy", name: "Text from Image")
+            store.ingest(.text(text, source: source))
+            pasteKeepingClipboard(text, into: target)
+        }
+    }
+
+    private func pasteKeepingClipboard(_ text: String, into target: NSRunningApplication?) {
+        paste.pastePreservingClipboard(text: text, into: target) { [weak self] in
+            self?.monitor.acknowledgeCurrentChange()
         }
     }
 

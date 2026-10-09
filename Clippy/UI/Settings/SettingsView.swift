@@ -53,7 +53,8 @@ struct GeneralSettingsView: View {
                 KeyboardShortcuts.Recorder("Open quick panel", name: .toggleQuickPanel)
                 KeyboardShortcuts.Recorder("Actions on selected text", name: .selectionActions)
                 KeyboardShortcuts.Recorder("Capture text from screen", name: .captureText)
-                Text("Actions on selected text: select text in any app to transform it or ask AI; Return replaces the selection (also under right-click → Services → Clippy Actions…). Capture text: drag over anything on screen — its text is recognised on this Mac and pasted at your cursor.")
+                KeyboardShortcuts.Recorder("Paste as text", name: .pasteAsText)
+                Text("Actions on selected text: select text in any app to transform it or ask AI; Return replaces the selection (also under right-click → Services → Clippy Actions…). Capture text: drag over anything on screen and its text is pasted. Paste as text: pastes plain text, or — if an image or screenshot is on the clipboard — the text in it. Text recognition runs on this Mac.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
