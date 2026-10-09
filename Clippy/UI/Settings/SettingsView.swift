@@ -18,12 +18,14 @@ struct SettingsView: View {
                 .tabItem { Label("Transforms", systemImage: "wand.and.stars") }
             AISettingsView()
                 .tabItem { Label("AI", systemImage: "sparkles") }
+            PermissionsSettingsView()
+                .tabItem { Label("Permissions", systemImage: "lock.shield") }
             SyncSettingsView()
                 .tabItem { Label("Sync", systemImage: "arrow.triangle.2.circlepath.icloud") }
             AboutSettingsView()
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
-        .frame(width: 720)
+        .frame(width: 780)
         .frame(minHeight: 460)
     }
 }
