@@ -1,5 +1,5 @@
 #!/usr/bin/env swift
-// Generates Clippy's app icon set (macOS 26 style: rounded square, layered glass, clipboard motif).
+// Generates Clipboard2's app icon set (macOS 26 style: rounded square, layered glass, clipboard motif).
 // Usage: swift scripts/make-icon.swift <path/to/AppIcon.appiconset>
 import AppKit
 import CoreGraphics

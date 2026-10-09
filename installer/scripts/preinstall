@@ -1,4 +1,7 @@
 #!/bin/bash
-# Quit a running Clippy so the bundle can be replaced cleanly.
+# Quit a running copy (also the app's former name) so the bundle can be replaced cleanly.
+/usr/bin/pkill -x Clipboard2 2>/dev/null || true
 /usr/bin/pkill -x Clippy 2>/dev/null || true
+# The app used to be called Clippy; remove that copy so there's only one.
+/bin/rm -rf "/Applications/Clippy.app"
 exit 0

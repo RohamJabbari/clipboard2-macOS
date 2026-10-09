@@ -1,4 +1,4 @@
-# Clippy
+# Clipboard2
 
 A native macOS clipboard manager: menu bar app, Spotlight-style quick panel, snippets,
 keychain-backed secrets, paste-time transforms and AI actions. Swift 6, SwiftUI first,
@@ -20,11 +20,11 @@ identity of team `XWTH2647FF` (not ad-hoc) so the Accessibility grant survives r
 ## Installer
 
 ```sh
-make pkg         # → dist/Clippy-<version>.pkg
+make pkg         # → dist/Clipboard2-<version>.pkg
 ```
 
 A standard macOS Installer package: welcome page, installs to /Applications (replacing an
-older copy), quits a running Clippy first and launches the new one, ends with the shortcuts.
+older copy), quits a running Clipboard2 first and launches the new one, ends with the shortcuts.
 
 ### Distribution (Developer ID)
 
@@ -34,7 +34,7 @@ Developer ID and notarized. One-time setup (needs the Apple Developer account ho
 1. Xcode → Settings → Accounts → your team → Manage Certificates → **+** →
    *Developer ID Application*, then **+** → *Developer ID Installer*.
 2. Create an app-specific password at account.apple.com → Sign-In and Security, then store it:
-   `xcrun notarytool store-credentials clippy-notary --apple-id <you> --team-id XWTH2647FF`
+   `xcrun notarytool store-credentials clipboard2-notary --apple-id <you> --team-id XWTH2647FF`
 3. `make pkg` now signs, notarizes and staples automatically; `make install` also switches to
    Developer ID so local and packaged builds share one signature.
 
@@ -50,9 +50,9 @@ API keys/secrets), because those grants are tied to the signing certificate.
 | Quick slots | **⌘1–9** paste the item bound to that slot (or the Nth row if the slot is empty); **⌘⇧1–9** binds the selection |
 | Actions | **⌘K**: transforms, AI actions, Save as Secret, pin, delete |
 | Multi-select | **⌘-click** toggles, **⇧-click** selects a range, **⇧↑/⇧↓** extend, **⌘A** selects all (empty search); Return pastes them all, text joined by line breaks |
-| Selected text, any app | **⌥⌘K**: transform it or ask AI; Return replaces the selection (also right-click → Services → Clippy Actions…) |
+| Selected text, any app | **⌥⌘K**: transform it or ask AI; Return replaces the selection (also right-click → Services → Clipboard2 Actions…) |
 | Text from screen | **⌥⇧⌘2**: drag over anything; the text is recognised on-device and pasted |
-| Right-click menu | **⌘-right-click** anywhere: Clippy items (text from image, actions on selection, recent, snippets, secrets, search) + Cut/Copy/Paste/Select All/Select Word/Look Up/Undo/Redo, Finder items in Finder, and “Show ‹App› Menu” for the app's own menu |
+| Right-click menu | **⌘-right-click** anywhere: Clipboard2 items (text from image, actions on selection, recent, snippets, secrets, search) + Cut/Copy/Paste/Select All/Select Word/Look Up/Undo/Redo, Finder items in Finder, and “Show ‹App› Menu” for the app's own menu |
 | Paste as text | **⌥⇧⌘V**: plain text; if the clipboard holds an image or screenshot, the text in it (on-device OCR). Clipboard is restored afterwards. In native apps also Services → *Paste Text from Clipboard Image* |
 | Other | **⌘P** pin, **⌫** delete (history only), **Tab** cycles filters, **Esc** closes |
 
@@ -60,7 +60,7 @@ Filters: All, Pinned, Text, Images, Files, Snippets, Secrets, This App (items co
 app you were in when you opened the panel).
 
 **Auto-paste** needs Accessibility access (System Settings → Privacy & Security →
-Accessibility → Clippy). Without it Clippy copies the item and you press ⌘V yourself.
+Accessibility → Clipboard2). Without it Clipboard2 copies the item and you press ⌘V yourself.
 
 **Secrets** are for things like a database password you paste many times a day. Add them in
 Settings → Secrets, or select a copied value in the panel and choose ⌘K → Save as Secret
@@ -80,7 +80,7 @@ through the provider chosen in Settings → AI:
 - OpenAI, DeepSeek, OpenRouter, any OpenAI-compatible endpoint (Ollama, LM Studio, Groq…)
 - Claude subscription (default): click "Sign in with Claude" in Settings → AI (and "Set Up Claude" if
   Claude Code isn't installed). It drives Anthropic's own Claude Code login, then runs `claude -p`.
-  No API key or API billing, but slower to start. Clippy never borrows a subscription token
+  No API key or API billing, but slower to start. Clipboard2 never borrows a subscription token
   itself; that would break Anthropic's terms.
 
 Model IDs aren't hardcoded beyond defaults: "Fetch Models" reads each provider's `/models`.
@@ -89,7 +89,7 @@ Model IDs aren't hardcoded beyond defaults: "Fetch Models" reads each provider's
 
 | What | Where |
 |---|---|
-| History database (SwiftData) | `~/Library/Application Support/at.softmaze.Clippy/Clippy.store` |
+| History database (SwiftData) | `~/Library/Application Support/at.softmaze.Clippy/Clipboard2.store` |
 | Images and thumbnails | `~/Library/Application Support/at.softmaze.Clippy/Blobs/` |
 | Settings, ignore list, slots | `UserDefaults` (`at.softmaze.Clippy`) |
 | API keys | login Keychain, service `at.softmaze.Clippy.anthropic` |
@@ -98,8 +98,8 @@ Model IDs aren't hardcoded beyond defaults: "Fetch Models" reads each provider's
 ## Architecture
 
 ```
-Clippy/
-  App/            ClippyApp (MenuBarExtra + Settings scenes), AppEnvironment (owns all
+Clipboard2/
+  App/            Clipboard2App (MenuBarExtra + Settings scenes), AppEnvironment (owns all
                   services, shared paste flows, URL hooks), SettingsOpener, AppPaths/Log
   Models/         ClipItem + Snippet (@Model), RawCapture/ProcessedCapture, AppRef
   Services/
@@ -115,7 +115,7 @@ Clippy/
                        stream-json), Keychain, AIRun
     Secrets            SecretVault (Keychain CRUD), SecretStore (Touch ID gate, unlock window)
     QuickSlots         ⌘1–9 bindings + global slot shortcuts (KeyboardShortcuts)
-    FrontmostAppTracker  remembers the last non-Clippy app (paste target, "This App")
+    FrontmostAppTracker  remembers the last non-Clipboard2 app (paste target, "This App")
   UI/
     MenuBar/      popover (recent 200 + pinned, search, pause/clear/settings/quit)
     Panel/        QuickPanelController (non-activating NSPanel, NSGlassEffectView on 26,
@@ -128,7 +128,7 @@ Clippy/
 Design notes:
 
 - **Never captured:** `org.nspasteboard.ConcealedType`, `TransientType`, `AutoGeneratedType`,
-  anything Clippy wrote itself (`at.softmaze.clippy.internal`), and copies from ignored apps
+  anything Clipboard2 wrote itself (`at.softmaze.clippy.internal`), and copies from ignored apps
   (prefilled with 1Password, Bitwarden, Keychain Access, Passwords).
 - **Dedupe:** text and rich text share a hash namespace, so the same words with or without
   formatting are one item; recopying bumps `lastCopiedAt` and keeps the richer formats.

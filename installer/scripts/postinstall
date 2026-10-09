@@ -1,8 +1,8 @@
 #!/bin/bash
-# Launch Clippy for the logged-in user (the installer itself runs as root).
+# Launch Clipboard2 for the logged-in user (the installer itself runs as root).
 CONSOLE_USER=$(/usr/bin/stat -f%Su /dev/console)
 if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
     CONSOLE_UID=$(/usr/bin/id -u "$CONSOLE_USER")
-    /bin/launchctl asuser "$CONSOLE_UID" /usr/bin/sudo -u "$CONSOLE_USER" /usr/bin/open -a "/Applications/Clippy.app" || true
+    /bin/launchctl asuser "$CONSOLE_UID" /usr/bin/sudo -u "$CONSOLE_USER" /usr/bin/open -a "/Applications/Clipboard2.app" || true
 fi
 exit 0

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds dist/Clippy-<version>.pkg — a standard macOS Installer package.
+# Builds dist/Clipboard2-<version>.pkg — a standard macOS Installer package.
 #
 # Signing is automatic:
 #   • "Developer ID Application" cert present → app signed with it (+ secure timestamp)
@@ -10,11 +10,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-NOTARY_PROFILE="${NOTARY_PROFILE:-clippy-notary}"
+NOTARY_PROFILE="${NOTARY_PROFILE:-clipboard2-notary}"
 DERIVED=build
 STAGE=build/pkg
 DIST=dist
-APP_NAME=Clippy
+APP_NAME=Clipboard2
 PKG_ID=at.softmaze.Clippy.pkg
 
 identity() { security find-identity -v ${2:-} | grep -o "\"$1: [^\"]*\"" | head -1 | tr -d '"' || true; }

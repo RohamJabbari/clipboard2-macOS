@@ -1,4 +1,4 @@
-APP_NAME   := Clippy
+APP_NAME   := Clipboard2
 PROJECT    := $(APP_NAME).xcodeproj
 SCHEME     := $(APP_NAME)
 DERIVED    := build
@@ -35,7 +35,8 @@ install: build
 	@osascript -e 'tell application id "at.softmaze.Clippy" to quit' >/dev/null 2>&1 || true
 	@sleep 1
 	@pkill -x $(APP_NAME) >/dev/null 2>&1 || true
-	rm -rf "$(INSTALL_DIR)/$(APP_NAME).app"
+	@pkill -x Clippy >/dev/null 2>&1 || true
+	rm -rf "$(INSTALL_DIR)/$(APP_NAME).app" "$(INSTALL_DIR)/Clippy.app"
 	cp -R "$(RELEASE_APP)" "$(INSTALL_DIR)/"
 	codesign --verify --strict "$(INSTALL_DIR)/$(APP_NAME).app"
 	open "$(INSTALL_DIR)/$(APP_NAME).app"
@@ -46,7 +47,7 @@ pkg:
 	scripts/make-pkg.sh
 
 icon:
-	swift scripts/make-icon.swift Clippy/Resources/Assets.xcassets/AppIcon.appiconset
+	swift scripts/make-icon.swift Clipboard2/Resources/Assets.xcassets/AppIcon.appiconset
 
 clean:
 	rm -rf $(DERIVED) $(PROJECT) dist

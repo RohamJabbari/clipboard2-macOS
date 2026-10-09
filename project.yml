@@ -1,4 +1,4 @@
-name: Clippy
+name: Clipboard2
 options:
   bundleIdPrefix: at.softmaze
   deploymentTarget:
@@ -27,16 +27,16 @@ packages:
     from: "2.0.0"
 
 targets:
-  Clippy:
+  Clipboard2:
     type: application
     platform: macOS
     sources:
-      - path: Clippy
+      - path: Clipboard2
     info:
-      path: Clippy/Info.plist
+      path: Clipboard2/Info.plist
       properties:
-        CFBundleDisplayName: Clippy
-        CFBundleName: Clippy
+        CFBundleDisplayName: Clipboard2
+        CFBundleName: Clipboard2
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSUIElement: true
@@ -45,27 +45,27 @@ targets:
         NSHumanReadableCopyright: "© 2026 Softmaze Solutions GmbH"
         CFBundleURLTypes:
           - CFBundleURLName: at.softmaze.Clippy
-            CFBundleURLSchemes: [clippy]
+            CFBundleURLSchemes: [clipboard2, clippy]
         NSServices:
           - NSMenuItem:
-              default: Clippy Actions…
+              default: Clipboard2 Actions…
             NSMessage: clippyActions
-            NSPortName: Clippy
+            NSPortName: Clipboard2
             NSSendTypes: [public.utf8-plain-text, NSStringPboardType]
             NSRequiredContext: {}
           - NSMenuItem:
               default: Paste Text from Clipboard Image
             NSMessage: pasteTextFromImage
-            NSPortName: Clippy
+            NSPortName: Clipboard2
             NSReturnTypes: [public.utf8-plain-text, NSStringPboardType]
             NSRequiredContext: {}
     entitlements:
-      path: Clippy/Clippy.entitlements
+      path: Clipboard2/Clipboard2.entitlements
       properties:
         com.apple.security.app-sandbox: false
     settings:
       base:
-        PRODUCT_NAME: Clippy
+        PRODUCT_NAME: Clipboard2
         PRODUCT_BUNDLE_IDENTIFIER: at.softmaze.Clippy
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_APP_SANDBOX: NO
@@ -76,29 +76,29 @@ targets:
     dependencies:
       - package: KeyboardShortcuts
 
-  ClippyTests:
+  Clipboard2Tests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - path: ClippyTests
+      - path: Clipboard2Tests
     dependencies:
-      - target: Clippy
+      - target: Clipboard2
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: at.softmaze.ClippyTests
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:
-  Clippy:
+  Clipboard2:
     build:
       targets:
-        Clippy: all
-        ClippyTests: [test]
+        Clipboard2: all
+        Clipboard2Tests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
-        - ClippyTests
+        - Clipboard2Tests
     archive:
       config: Release
