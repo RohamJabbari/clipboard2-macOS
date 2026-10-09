@@ -1,0 +1,4 @@
+#!/bin/bash
+# Quit a running Clippy so the bundle can be replaced cleanly.
+/usr/bin/pkill -x Clippy 2>/dev/null || true
+exit 0

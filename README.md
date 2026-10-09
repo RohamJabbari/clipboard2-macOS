@@ -17,6 +17,30 @@ Needs Xcode 26 and `xcodegen` (`brew install xcodegen`). `project.yml` is the so
 truth; the `.xcodeproj` is generated and git-ignored. Signing uses the Apple Development
 identity of team `XWTH2647FF` (not ad-hoc) so the Accessibility grant survives rebuilds.
 
+## Installer
+
+```sh
+make pkg         # → dist/Clippy-<version>.pkg
+```
+
+A standard macOS Installer package: welcome page, installs to /Applications (replacing an
+older copy), quits a running Clippy first and launches the new one, ends with the shortcuts.
+
+### Distribution (Developer ID)
+
+To install without Gatekeeper warnings on other Macs, the app and package must be signed with
+Developer ID and notarized. One-time setup (needs the Apple Developer account holder):
+
+1. Xcode → Settings → Accounts → your team → Manage Certificates → **+** →
+   *Developer ID Application*, then **+** → *Developer ID Installer*.
+2. Create an app-specific password at account.apple.com → Sign-In and Security, then store it:
+   `xcrun notarytool store-credentials clippy-notary --apple-id <you> --team-id XWTH2647FF`
+3. `make pkg` now signs, notarizes and staples automatically; `make install` also switches to
+   Developer ID so local and packaged builds share one signature.
+
+After the switch, macOS asks once more for Accessibility (and Keychain access to existing
+API keys/secrets), because those grants are tied to the signing certificate.
+
 ## Using it
 
 | Where | Keys |
@@ -26,6 +50,8 @@ identity of team `XWTH2647FF` (not ad-hoc) so the Accessibility grant survives r
 | Quick slots | **⌘1–9** paste the item bound to that slot (or the Nth row if the slot is empty); **⌘⇧1–9** binds the selection |
 | Actions | **⌘K**: transforms, AI actions, Save as Secret, pin, delete |
 | Multi-select | **⌘-click** toggles, **⇧-click** selects a range, **⇧↑/⇧↓** extend, **⌘A** selects all (empty search); Return pastes them all, text joined by line breaks |
+| Selected text, any app | **⌥⌘K**: transform it or ask AI; Return replaces the selection (also right-click → Services → Clippy Actions…) |
+| Text from screen | **⇧⌘2**: drag over anything; the text is recognised on-device and pasted |
 | Other | **⌘P** pin, **⌫** delete (history only), **Tab** cycles filters, **Esc** closes |
 
 Filters: All, Pinned, Text, Images, Files, Snippets, Secrets, This App (items copied from the
