@@ -259,6 +259,11 @@ struct MenuBarContentView: View {
                 dismiss()
                 env.showQuickPanel()
             }
+            footerButton("Capture Text from Screen", symbol: "text.viewfinder") {
+                dismiss()
+                // Let the popover close before the screenshot crosshair appears.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { env.captureScreenText() }
+            }
             Spacer()
             footerButton(env.prefs.isPaused ? "Resume Capture" : "Pause Capture",
                          symbol: env.prefs.isPaused ? "play.fill" : "pause.fill") {

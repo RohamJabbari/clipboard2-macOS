@@ -6,6 +6,7 @@ import KeyboardShortcuts
 extension KeyboardShortcuts.Name {
     static let toggleQuickPanel = Self("toggleQuickPanel", default: .init(.v, modifiers: [.command, .shift]))
     static let selectionActions = Self("selectionActions", default: .init(.k, modifiers: [.command, .option]))
+    static let captureText = Self("captureText", default: .init(.two, modifiers: [.command, .shift]))
 }
 
 /// Owns every long-lived service. Created once at launch and injected into SwiftUI via `.environment`.
@@ -99,6 +100,9 @@ final class AppEnvironment {
         // Key-up, so the user's ⌥⌘ are released before we send ⌘C to the other app.
         KeyboardShortcuts.onKeyUp(for: .selectionActions) { [weak self] in
             self?.showSelectionActions()
+        }
+        KeyboardShortcuts.onKeyUp(for: .captureText) { [weak self] in
+            self?.captureScreenText()
         }
         NSApp.servicesProvider = serviceProvider
         NSUpdateDynamicServices()
@@ -199,6 +203,45 @@ final class AppEnvironment {
                 return
             }
             panel.showForSelection(text, target: target)
+        }
+    }
+
+    // MARK: Text from screen
+
+    /// Screenshot a region, recognise its text on-device, paste it at the cursor and keep it
+    /// in history.
+    func captureScreenText() {
+        guard CGPreflightScreenCaptureAccess() else {
+            // Shows the system prompt (first time) and adds Clippy to Screen Recording settings.
+            if !CGRequestScreenCaptureAccess() {
+                showScreenRecordingHelp()
+            }
+            return
+        }
+        let target = appTracker.targetApp
+        Task {
+            guard let image = await ScreenTextCapture.captureRegion() else { return }
+            let text = (try? await ScreenTextCapture.recognizeText(in: image)) ?? ""
+            guard !text.isEmpty else {
+                NSSound.beep()
+                return
+            }
+            let source = AppRef(bundleID: Bundle.main.bundleIdentifier ?? "at.softmaze.Clippy", name: "Text from Screen")
+            store.ingest(.text(text, source: source))
+            paste.paste(text: text, into: target)
+        }
+    }
+
+    private func showScreenRecordingHelp() {
+        let alert = NSAlert()
+        alert.messageText = "Allow Clippy to Read Text from the Screen"
+        alert.informativeText = "Turn on Clippy in System Settings → Privacy & Security → Screen & System Audio Recording, then try again. Screenshots are processed on this Mac and deleted immediately."
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate()
+        if alert.runModal() == .alertFirstButtonReturn,
+           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+            NSWorkspace.shared.open(url)
         }
     }
 
