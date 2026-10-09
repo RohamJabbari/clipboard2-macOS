@@ -44,15 +44,15 @@ enum Permission: String, CaseIterable, Identifiable {
         }
     }
 
-    func request() {
+    /// From the permissions list: just open the right Settings page (no system dialogs —
+    /// those belong to the moment a feature is actually used).
+    func openSettings() {
         switch self {
         case .accessibility:
-            AXPermission.requestTrust()
+            AXPermission.registerSilently()
             AXPermission.openSystemSettings()
         case .screenRecording:
-            if !CGRequestScreenCaptureAccess() {
-                open("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
-            }
+            open("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
         case .loginItem:
             if !LoginItem.setEnabled(true) || LoginItem.requiresApproval {
                 open("x-apple.systempreferences:com.apple.LoginItems-Settings.extension")
@@ -121,8 +121,19 @@ struct PermissionsView: View {
             }
             .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
+            if granted[.accessibility] != true {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("Already turned on but still not allowed? An entry from an older version may be in the way.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Reset") { AXPermission.resetAndReRegister() }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                }
+            }
+
             if screenRecordingRequested && granted[.screenRecording] != true {
-                Text("After allowing Screen Recording, macOS may ask to quit and reopen Clipboard2.")
+                Text("After allowing Screen Recording, quit and reopen Clipboard2 — macOS only applies it on the next launch.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -186,7 +197,7 @@ struct PermissionsView: View {
             } else {
                 Button(permission == .loginItem ? "Turn On" : "Open Settings") {
                     if permission == .screenRecording { screenRecordingRequested = true }
-                    permission.request()
+                    permission.openSettings()
                 }
             }
         }
@@ -234,7 +245,13 @@ struct PermissionsSettingsView: View {
                             VStack(alignment: .trailing, spacing: 4) {
                                 Label("Not allowed", systemImage: permission.isRequired ? "exclamationmark.triangle.fill" : "circle.dashed")
                                     .foregroundStyle(permission.isRequired ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-                                Button(permission == .loginItem ? "Turn On" : "Open Settings") { permission.request() }
+                                Button(permission == .loginItem ? "Turn On" : "Open Settings") { permission.openSettings() }
+                                if permission == .accessibility {
+                                    Button("Still Not Working? Reset") { AXPermission.resetAndReRegister() }
+                                        .buttonStyle(.link)
+                                        .font(.caption)
+                                        .help("Removes Clipboard2's Accessibility entry and adds it again — needed after the app's signature changed")
+                                }
                             }
                         }
                     }

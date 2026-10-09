@@ -32,6 +32,33 @@ enum AXPermission {
         _ = AXIsProcessTrustedWithOptions(options)
     }
 
+    /// Makes Clipboard2 appear in the Accessibility list without the system "would like to
+    /// control this computer" dialog: an active event tap that's denied registers the app.
+    static func registerSilently() {
+        guard !isTrusted else { return }
+        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+        if let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
+                                       eventsOfInterest: mask, callback: { _, _, event, _ in Unmanaged.passUnretained(event) },
+                                       userInfo: nil) {
+            CFMachPortInvalidate(tap)
+        }
+    }
+
+    /// Clears this app's Accessibility entry (e.g. one left from an older signature that no
+    /// longer matches) and adds it back, unchecked, so the user can turn it on again.
+    static func resetAndReRegister() {
+        if let bundleID = Bundle.main.bundleIdentifier {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+            process.arguments = ["reset", "Accessibility", bundleID]
+            try? process.run()
+            process.waitUntilExit()
+        }
+        registerSilently()
+        requestTrust()   // after a reset this is the one moment the system dialog is expected
+        openSystemSettings()
+    }
+
     static func openSystemSettings() {
         let urls = [
             "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility",
