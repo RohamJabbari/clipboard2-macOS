@@ -200,3 +200,52 @@ struct SecretPreviewView: View {
         return "Press Return to paste. You'll confirm with Touch ID or your password." + clear
     }
 }
+
+/// Shown instead of the single-item preview when several rows are selected.
+struct MultiSelectionPreview: View {
+    let clips: [ClipItem]
+    let totalSelected: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(clips.count) items selected").font(.headline)
+                Text(summary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(14)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(clips) { item in
+                        HStack(spacing: 8) {
+                            ClipIconView(item: item, size: 20)
+                            Text(item.preview.isEmpty ? item.kind.displayName : item.preview)
+                                .lineLimit(2)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+            }
+        }
+    }
+
+    private var summary: String {
+        var parts: [String] = []
+        if clips.allSatisfy(\.kind.isTextual) {
+            parts.append("Return pastes them as one text, one item per line, in list order.")
+        } else if clips.allSatisfy({ $0.kind == .file }) {
+            parts.append("Return pastes all files together.")
+        } else {
+            parts.append("Return pastes them as separate items; apps that accept only one use the first.")
+        }
+        if totalSelected > clips.count {
+            parts.append("Snippets and secrets in the selection are skipped.")
+        }
+        return parts.joined(separator: " ")
+    }
+}

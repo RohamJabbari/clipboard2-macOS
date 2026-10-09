@@ -25,6 +25,7 @@ identity of team `XWTH2647FF` (not ad-hoc) so the Accessibility grant survives r
 | Navigate / paste | ↑ ↓, **Return** pastes into the app you came from, **⌥Return** pastes as plain text |
 | Quick slots | **⌘1–9** paste the item bound to that slot (or the Nth row if the slot is empty); **⌘⇧1–9** binds the selection |
 | Actions | **⌘K**: transforms, AI actions, Save as Secret, pin, delete |
+| Multi-select | **⌘-click** toggles, **⇧-click** selects a range, **⇧↑/⇧↓** extend, **⌘A** selects all (empty search); Return pastes them all, text joined by line breaks |
 | Other | **⌘P** pin, **⌫** delete (history only), **Tab** cycles filters, **Esc** closes |
 
 Filters: All, Pinned, Text, Images, Files, Snippets, Secrets, This App (items copied from the

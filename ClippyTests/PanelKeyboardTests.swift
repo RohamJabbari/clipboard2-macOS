@@ -42,4 +42,43 @@ struct PanelKeyboardTests {
         model.query = "abc"
         #expect(model.handleKeyDown(key(KeyCode.delete, "\u{7f}")) == false)
     }
+
+    @Test func shiftArrowsExtendAndPlainArrowCollapses() {
+        let store = env.store
+        let a = store.ingest(.text("multi-a \(UUID())"))
+        let b = store.ingest(.text("multi-b \(UUID())"))
+        let c = store.ingest(.text("multi-c \(UUID())"))
+        defer { [a, b, c].forEach(store.delete) }
+        model.query = "multi-"
+        model.refresh(resetSelection: true)
+        #expect(model.entries.count >= 3)
+
+        #expect(model.handleKeyDown(key(KeyCode.downArrow, "", flags: .shift)))
+        #expect(model.handleKeyDown(key(KeyCode.downArrow, "", flags: .shift)))
+        #expect(model.selectedIDs.count == 3)
+        #expect(model.isMultiSelecting)
+
+        #expect(model.handleKeyDown(key(KeyCode.upArrow, "")))
+        #expect(model.selectedIDs.count == 1)
+    }
+
+    @Test func toggleAndRangeSelection() {
+        let store = env.store
+        let items = (0..<4).map { store.ingest(.text("range-\($0) \(UUID())")) }
+        defer { items.forEach(store.delete) }
+        model.query = "range-"
+        model.refresh(resetSelection: true)
+        let ids = model.entries.prefix(4).map(\.id)
+
+        model.selectedID = ids[0]
+        model.toggleSelection(ids[2])
+        #expect(model.selectedIDs == [ids[0], ids[2]])
+        model.toggleSelection(ids[0])
+        #expect(model.selectedIDs == [ids[2]])
+
+        model.selectedID = ids[1]
+        model.extendSelection(to: ids[3])
+        #expect(model.selectedIDs == Set(ids[1...3]))
+        #expect(model.selectedClips.count == 3)
+    }
 }

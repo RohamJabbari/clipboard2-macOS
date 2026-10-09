@@ -21,7 +21,8 @@ struct QuickPanelView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             Divider()
-            HintBar(entry: model.selectedEntry, mode: model.mode, notice: model.notice)
+            HintBar(entry: model.selectedEntry, mode: model.mode, notice: model.notice,
+                    selectionCount: model.isMultiSelecting ? model.selectedClips.count : nil)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { searchFocused = true }
@@ -85,10 +86,17 @@ struct QuickPanelView: View {
                         LazyVStack(spacing: 2) {
                             ForEach(Array(model.entries.enumerated()), id: \.element.id) { index, entry in
                                 PanelRow(entry: entry, shortcut: model.shortcutNumber(for: entry, at: index),
-                                         isSelected: entry.id == model.selectedID)
+                                         isSelected: model.isSelected(entry),
+                                         showsCheckmark: model.isMultiSelecting)
                                     .id(entry.id)
-                                    .onTapGesture(count: 2) { model.activate(entry) }
-                                    .onTapGesture { model.selectedID = entry.id }
+                                    .onTapGesture(count: 2) {
+                                        if model.isMultiSelecting && model.isSelected(entry) {
+                                            model.pasteSelection()
+                                        } else {
+                                            model.activate(entry)
+                                        }
+                                    }
+                                    .onTapGesture { model.click(entry) }
                                     .contextMenu { contextMenu(for: entry) }
                             }
                         }
@@ -149,7 +157,9 @@ struct QuickPanelView: View {
                 AIResultView(run: run, model: model)
             }
         case .browse:
-            if let entry = model.selectedEntry {
+            if model.isMultiSelecting {
+                MultiSelectionPreview(clips: model.selectedClips, totalSelected: model.selectedIDs.count)
+            } else if let entry = model.selectedEntry {
                 PreviewPane(entry: entry)
             } else {
                 Color.clear
@@ -207,9 +217,17 @@ struct PanelRow: View {
     let entry: PanelEntry
     let shortcut: (number: Int, isSlot: Bool)?
     let isSelected: Bool
+    var showsCheckmark = false
 
     var body: some View {
         HStack(spacing: 10) {
+            if showsCheckmark {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 15))
+                    .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.tertiary))
+                    .transition(.scale.combined(with: .opacity))
+                    .accessibilityHidden(true)
+            }
             leading
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -312,10 +330,17 @@ struct HintBar: View {
     let entry: PanelEntry?
     let mode: PanelMode
     let notice: String?
+    var selectionCount: Int?
 
     var body: some View {
         HStack(spacing: 14) {
             switch mode {
+            case .browse where selectionCount != nil:
+                hint("⏎", "Paste \(selectionCount ?? 0) Items")
+                hint("⌥⏎", "Plain Text")
+                hint("⌘K", "Actions")
+                hint("⌘P", "Pin")
+                hint("⌫", "Delete")
             case .browse:
                 hint("⏎", "Paste")
                 if entry?.clip != nil {

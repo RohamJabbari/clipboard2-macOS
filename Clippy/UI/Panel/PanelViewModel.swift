@@ -162,7 +162,18 @@ final class PanelViewModel {
     var query = "" { didSet { if query != oldValue { refresh(resetSelection: true) } } }
     var filter: PanelFilter = .all { didSet { if filter != oldValue { refresh(resetSelection: true) } } }
     private(set) var entries: [PanelEntry] = []
-    var selectedID: String?
+    /// The focused row (drives the preview and keyboard navigation).
+    var selectedID: String? {
+        didSet {
+            guard !adjustingSelection else { return }
+            selectedIDs = selectedID.map { [$0] } ?? []
+            anchorID = selectedID
+        }
+    }
+    /// Every selected row; more than one after ⌘-click, ⇧-click, ⇧-arrows or ⌘A.
+    private(set) var selectedIDs: Set<String> = []
+    @ObservationIgnored private var anchorID: String?
+    @ObservationIgnored private var adjustingSelection = false
     /// Bumped each time the panel opens so the view can refocus the search field.
     private(set) var focusToken = 0
 
@@ -279,6 +290,9 @@ final class PanelViewModel {
         entries = Array(result.prefix(Self.maxEntries))
         if resetSelection || !entries.contains(where: { $0.id == selectedID }) {
             selectedID = entries.first?.id
+        } else {
+            let live = Set(entries.map(\.id))
+            setSelection(selectedIDs.intersection(live), focus: selectedID)
         }
     }
 
@@ -290,11 +304,109 @@ final class PanelViewModel {
         selectedIndex.map { entries[$0] }
     }
 
-    func moveSelection(by delta: Int) {
+    func moveSelection(by delta: Int, extending: Bool = false) {
         guard !entries.isEmpty else { return }
         let current = selectedIndex ?? (delta > 0 ? -1 : entries.count)
         let next = min(max(current + delta, 0), entries.count - 1)
-        selectedID = entries[next].id
+        if extending {
+            extendSelection(to: entries[next].id)
+        } else {
+            selectedID = entries[next].id
+        }
+    }
+
+    // MARK: Multi-selection
+
+    var isMultiSelecting: Bool { selectedIDs.count > 1 }
+
+    /// Selected history items in list order (snippets and secrets are single-select only).
+    var selectedClips: [ClipItem] {
+        entries.compactMap { selectedIDs.contains($0.id) ? $0.clip : nil }
+    }
+
+    func isSelected(_ entry: PanelEntry) -> Bool { selectedIDs.contains(entry.id) }
+
+    /// Mouse selection following macOS conventions: ⌘ toggles, ⇧ selects a range.
+    func click(_ entry: PanelEntry) {
+        let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.command) {
+            toggleSelection(entry.id)
+        } else if flags.contains(.shift) {
+            extendSelection(to: entry.id)
+        } else {
+            selectedID = entry.id
+        }
+    }
+
+    func toggleSelection(_ id: String) {
+        var ids = selectedIDs
+        if ids.contains(id), ids.count > 1 {
+            ids.remove(id)
+            let focus = id == selectedID ? entries.first { ids.contains($0.id) }?.id : selectedID
+            setSelection(ids, focus: focus)
+        } else {
+            ids.insert(id)
+            setSelection(ids, focus: id)
+        }
+        anchorID = id
+    }
+
+    func extendSelection(to id: String) {
+        guard let anchor = anchorID ?? selectedID,
+              let from = entries.firstIndex(where: { $0.id == anchor }),
+              let to = entries.firstIndex(where: { $0.id == id })
+        else {
+            selectedID = id
+            return
+        }
+        let range = min(from, to)...max(from, to)
+        setSelection(Set(entries[range].map(\.id)), focus: id)
+    }
+
+    func selectAll() {
+        guard let first = entries.first else { return }
+        anchorID = first.id
+        setSelection(Set(entries.map(\.id)), focus: selectedID ?? first.id)
+    }
+
+    private func setSelection(_ ids: Set<String>, focus: String?) {
+        adjustingSelection = true
+        selectedIDs = ids
+        selectedID = focus
+        adjustingSelection = false
+    }
+
+    func pasteSelection(transform: Transform? = nil) {
+        let clips = selectedClips
+        guard !clips.isEmpty else { return }
+        if clips.count == 1 {
+            activate(.clip(clips[0]), transform: transform)
+            return
+        }
+        let target = targetApp
+        onClose()
+        env.paste.paste(clips, transform: transform, into: target)
+    }
+
+    func togglePinOnSelectedClips() {
+        let clips = selectedClips
+        let pin = clips.contains { !$0.isPinned }
+        for item in clips where item.isPinned != pin { env.store.togglePin(item) }
+        refresh()
+        showNotice(pin ? "Pinned \(clips.count) items" : "Unpinned \(clips.count) items")
+    }
+
+    func deleteSelectedClips() {
+        let clips = selectedClips
+        guard !clips.isEmpty else { return }
+        let firstIndex = entries.firstIndex { selectedIDs.contains($0.id) } ?? 0
+        for item in clips {
+            env.slots.remove(target: .clip(item.id))
+            env.store.delete(item)
+        }
+        refresh()
+        if !entries.isEmpty { selectedID = entries[min(firstIndex, entries.count - 1)].id }
+        showNotice("Deleted \(clips.count) items")
     }
 
     func cycleFilter(forward: Bool) {
@@ -378,7 +490,7 @@ final class PanelViewModel {
     // MARK: Action menu
 
     func openActions() {
-        guard selectedEntry != nil else { return }
+        guard selectedEntry != nil || isMultiSelecting else { return }
         actionQuery = ""
         actionSelection = 0
         mode = .actions
@@ -387,6 +499,19 @@ final class PanelViewModel {
     var aiName: String { env.prefs.aiProvider.shortName }
 
     var availableActions: [PanelAction] {
+        if isMultiSelecting {
+            let clips = selectedClips
+            guard !clips.isEmpty else { return [] }
+            var actions: [PanelAction] = [.paste]
+            if clips.allSatisfy(\.kind.isTextual) {
+                actions.append(.pastePlain)
+                actions.append(.copy)
+                actions += Transform.allCases.filter { $0 != .plainText }.map(PanelAction.transform)
+            } else {
+                actions.append(.copy)
+            }
+            return actions + [.togglePin, .delete]
+        }
         guard let entry = selectedEntry else { return [] }
         var actions: [PanelAction] = [.paste]
         switch entry {
@@ -428,6 +553,10 @@ final class PanelViewModel {
     }
 
     func perform(_ action: PanelAction) {
+        if isMultiSelecting {
+            performOnSelection(action)
+            return
+        }
         guard let entry = selectedEntry else { return }
         switch action {
         case .paste:
@@ -471,6 +600,36 @@ final class PanelViewModel {
         case .delete:
             mode = .browse
             deleteSelection(includingSecrets: true)
+        }
+    }
+
+    private func performOnSelection(_ action: PanelAction) {
+        let clips = selectedClips
+        switch action {
+        case .paste:
+            pasteSelection()
+        case .pastePlain:
+            pasteSelection(transform: .plainText)
+        case .copy:
+            env.paste.write(clips, transform: nil)
+            onClose()
+        case .transform(let transform):
+            let parts = clips.map { transform.apply($0.text) }
+            guard parts.allSatisfy({ $0 != nil }) else {
+                showNotice("Can't apply “\(transform.title)” to every selected item")
+                return
+            }
+            let target = targetApp
+            onClose()
+            env.paste.paste(text: parts.compactMap { $0 }.joined(separator: "\n"), into: target)
+        case .togglePin:
+            togglePinOnSelectedClips()
+            mode = .browse
+        case .delete:
+            mode = .browse
+            deleteSelectedClips()
+        default:
+            break
         }
     }
 
@@ -551,26 +710,30 @@ final class PanelViewModel {
             onClose()
             return true
         case KeyCode.upArrow:
-            moveSelection(by: -1)
+            moveSelection(by: -1, extending: shift)
             return true
         case KeyCode.downArrow:
-            moveSelection(by: 1)
+            moveSelection(by: 1, extending: shift)
             return true
         case KeyCode.pageUp:
-            moveSelection(by: -8)
+            moveSelection(by: -8, extending: shift)
             return true
         case KeyCode.pageDown:
-            moveSelection(by: 8)
+            moveSelection(by: 8, extending: shift)
             return true
         case KeyCode.returnKey, KeyCode.keypadEnter:
-            activate(selectedEntry, transform: option ? .plainText : nil)
+            if isMultiSelecting {
+                pasteSelection(transform: option ? .plainText : nil)
+            } else {
+                activate(selectedEntry, transform: option ? .plainText : nil)
+            }
             return true
         case KeyCode.tab:
             cycleFilter(forward: !shift)
             return true
         case KeyCode.delete, KeyCode.forwardDelete:
             if command || query.isEmpty {
-                deleteSelection()
+                if isMultiSelecting { deleteSelectedClips() } else { deleteSelection() }
                 return true
             }
             return false
@@ -590,7 +753,12 @@ final class PanelViewModel {
             }
             switch chars {
             case "p":
-                togglePinOnSelection()
+                if isMultiSelecting { togglePinOnSelectedClips() } else { togglePinOnSelection() }
+                return true
+            case "a":
+                // With an empty search field ⌘A selects every row; otherwise it selects the text.
+                guard query.isEmpty else { return false }
+                selectAll()
                 return true
             case "k":
                 openActions()
