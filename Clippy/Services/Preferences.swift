@@ -67,6 +67,8 @@ final class Preferences {
         static let secretGraceMinutes = "secretGraceMinutes"
         static let secretClearSeconds = "secretClearSeconds"
         static let dedupeVersion = "dedupeVersion"
+        static let contextMenuEnabled = "contextMenuEnabled"
+        static let contextMenuModifier = "contextMenuModifier"
         static let customPrompts = "customPrompts"
         static let hasLaunchedBefore = "hasLaunchedBefore"
         static let hasShownAccessibilityOnboarding = "hasShownAccessibilityOnboarding"
@@ -109,6 +111,10 @@ final class Preferences {
     var secretGraceMinutes: Int { didSet { defaults.set(secretGraceMinutes, forKey: Key.secretGraceMinutes) } }
     var secretClearSeconds: Int { didSet { defaults.set(secretClearSeconds, forKey: Key.secretClearSeconds) } }
     var dedupeVersion: Int { didSet { defaults.set(dedupeVersion, forKey: Key.dedupeVersion) } }
+    var contextMenuEnabled: Bool { didSet { defaults.set(contextMenuEnabled, forKey: Key.contextMenuEnabled) } }
+    var contextMenuModifier: ContextMenuModifier {
+        didSet { defaults.set(contextMenuModifier.rawValue, forKey: Key.contextMenuModifier) }
+    }
     var customPrompts: [CustomPrompt] { didSet { store(customPrompts, Key.customPrompts) } }
     var hasLaunchedBefore: Bool { didSet { defaults.set(hasLaunchedBefore, forKey: Key.hasLaunchedBefore) } }
     var hasShownAccessibilityOnboarding: Bool {
@@ -126,6 +132,8 @@ final class Preferences {
             Key.customBaseURL: AIProviderKind.custom.defaultBaseURL,
             Key.secretGraceMinutes: 15,
             Key.secretClearSeconds: 30,
+            Key.contextMenuEnabled: true,
+            Key.contextMenuModifier: ContextMenuModifier.command.rawValue,
         ])
         let storedMax = defaults.integer(forKey: Key.maxItems)
         maxItems = storedMax == 0 ? 0 : max(10, storedMax)
@@ -151,6 +159,8 @@ final class Preferences {
         secretGraceMinutes = max(0, defaults.integer(forKey: Key.secretGraceMinutes))
         secretClearSeconds = max(0, defaults.integer(forKey: Key.secretClearSeconds))
         dedupeVersion = defaults.integer(forKey: Key.dedupeVersion)
+        contextMenuEnabled = defaults.bool(forKey: Key.contextMenuEnabled)
+        contextMenuModifier = ContextMenuModifier(rawValue: defaults.string(forKey: Key.contextMenuModifier) ?? "") ?? .command
         customPrompts = Self.load([CustomPrompt].self, defaults, Key.customPrompts) ?? []
         hasLaunchedBefore = defaults.bool(forKey: Key.hasLaunchedBefore)
         hasShownAccessibilityOnboarding = defaults.bool(forKey: Key.hasShownAccessibilityOnboarding)

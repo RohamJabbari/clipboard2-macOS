@@ -5,16 +5,19 @@ import UniformTypeIdentifiers
 /// On-device text recognition (Vision) for a captured screen region or a clipboard image.
 /// Nothing is uploaded; captured screenshots are deleted right after recognition.
 nonisolated enum ScreenTextCapture {
-    /// Lets the user drag a region with the standard screenshot UI. Nil if cancelled.
-    static func captureRegion() async -> CGImage? {
-        let url = FileManager.default.temporaryDirectory.appending(path: "clippy-ocr-\(UUID().uuidString).png")
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = await CLIRunner.run(URL(fileURLWithPath: "/usr/sbin/screencapture"), ["-i", "-x", url.path])
-        guard result.status == 0,
-              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+    /// Lets the user drag a region with the standard screenshot crosshair, captured straight to
+    /// the clipboard (no floating thumbnail). Returns nil if cancelled. The caller restores the
+    /// previous clipboard.
+    @MainActor
+    static func captureRegionToClipboard() async -> CGImage? {
+        let pasteboard = NSPasteboard.general
+        let before = pasteboard.changeCount
+        _ = await CLIRunner.run(URL(fileURLWithPath: "/usr/sbin/screencapture"), ["-i", "-c", "-x"])
+        guard pasteboard.changeCount != before,
+              let data = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff),
+              let source = CGImageSourceCreateWithData(data as CFData, nil)
         else { return nil }
-        return image
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
     /// Recognises text in reading order (top to bottom, then left to right), one line per row.

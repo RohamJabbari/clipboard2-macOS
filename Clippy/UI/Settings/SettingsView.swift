@@ -59,6 +59,21 @@ struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section {
+                Toggle("Open Clippy's menu with \(prefs.contextMenuModifier.symbol)-right-click", isOn: $prefs.contextMenuEnabled)
+                Picker("Modifier", selection: $prefs.contextMenuModifier) {
+                    ForEach(ContextMenuModifier.allCases) { Text($0.title).tag($0) }
+                }
+                .disabled(!prefs.contextMenuEnabled)
+            } header: {
+                Text("Right-click menu")
+            } footer: {
+                Text("Works in every app: Clippy's actions plus Cut, Copy, Paste, Select All and the usual items (Finder items in Finder). “Show ‹App› Menu” opens the app's own menu. Plain right-clicks are never changed. Needs Accessibility access.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .onChange(of: prefs.contextMenuEnabled) { env.contextMenu.update() }
+
             Section("Capture") {
                 Toggle("Pause clipboard capture", isOn: $prefs.isPaused)
                 LabeledContent("Auto-paste") {

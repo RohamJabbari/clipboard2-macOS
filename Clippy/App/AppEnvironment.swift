@@ -37,6 +37,7 @@ final class AppEnvironment {
 
     @ObservationIgnored private var maintenanceTimer: Timer?
     @ObservationIgnored private lazy var serviceProvider = ServiceProvider(env: self)
+    @ObservationIgnored private(set) lazy var contextMenu = ContextMenuController(env: self)
     @ObservationIgnored private var maintenanceRuns = 0
     #if DEBUG
     @ObservationIgnored private var stressMonitor: ClipboardMonitor?
@@ -112,6 +113,7 @@ final class AppEnvironment {
         KeyboardShortcuts.onKeyUp(for: .pasteAsText) { [weak self] in
             self?.pasteClipboardAsText()
         }
+        contextMenu.update()
         NSApp.servicesProvider = serviceProvider
         NSUpdateDynamicServices()
         for (index, name) in KeyboardShortcuts.Name.quickSlots.enumerated() {
@@ -155,6 +157,7 @@ final class AppEnvironment {
 
     func runMaintenance() {
         store.enforceRetention(maxItems: prefs.maxItems, maxAge: prefs.maxAge)
+        contextMenu.update()   // starts the right-click tap once Accessibility is granted
         maintenanceRuns &+= 1
         if maintenanceRuns % 30 == 1 { store.removeOrphanedBlobs() }   // directory scan: every ~30 min
     }
@@ -228,7 +231,15 @@ final class AppEnvironment {
         }
         let target = appTracker.targetApp
         Task {
-            guard let image = await ScreenTextCapture.captureRegion() else { return }
+            // Capture to the clipboard (a file capture shows the floating thumbnail and the
+            // image ends up being used instead of its text), then put the old clipboard back.
+            monitor.isSuspended = true
+            let saved = paste.snapshot()
+            let image = await ScreenTextCapture.captureRegionToClipboard()
+            paste.restore(saved)
+            monitor.acknowledgeCurrentChange()
+            monitor.isSuspended = false
+            guard let image else { return }        // cancelled with Esc
             let text = (try? await ScreenTextCapture.recognizeText(in: image)) ?? ""
             guard !text.isEmpty else {
                 NSSound.beep()
@@ -236,7 +247,7 @@ final class AppEnvironment {
             }
             let source = AppRef(bundleID: Bundle.main.bundleIdentifier ?? "at.softmaze.Clippy", name: "Text from Screen")
             store.ingest(.text(text, source: source))
-            paste.paste(text: text, into: target)
+            pasteKeepingClipboard(text, into: target)
         }
     }
 

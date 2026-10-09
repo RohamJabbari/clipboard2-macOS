@@ -190,6 +190,23 @@ final class PasteService {
         }
     }
 
+    /// Posts a mouse click (or double-click) at a global, top-left-origin location.
+    static func postClick(at location: CGPoint, button: CGMouseButton = .left, count: Int = 1) {
+        let (downType, upType): (CGEventType, CGEventType) = button == .right
+            ? (.rightMouseDown, .rightMouseUp) : (.leftMouseDown, .leftMouseUp)
+        let source = CGEventSource(stateID: .combinedSessionState)
+        for click in 1...max(1, count) {
+            guard let down = CGEvent(mouseEventSource: source, mouseType: downType, mouseCursorPosition: location, mouseButton: button),
+                  let up = CGEvent(mouseEventSource: source, mouseType: upType, mouseCursorPosition: location, mouseButton: button)
+            else { return }
+            for event in [down, up] {
+                event.setIntegerValueField(.mouseEventClickState, value: Int64(click))
+                event.setIntegerValueField(.eventSourceUserData, value: syntheticEventMarker)
+                event.post(tap: .cgSessionEventTap)
+            }
+        }
+    }
+
     // MARK: Reading the current selection
 
     typealias Snapshot = [[NSPasteboard.PasteboardType: Data]]
@@ -226,7 +243,10 @@ final class PasteService {
         return text?.isEmpty == false ? text : nil
     }
 
-    private static func postKey(_ keyCode: CGKeyCode, flags: CGEventFlags) {
+    /// Value stamped on every event Clippy synthesises, so Clippy's own event tap ignores them.
+    static let syntheticEventMarker: Int64 = 0x436C_6970   // "Clip"
+
+    static func postKey(_ keyCode: CGKeyCode, flags: CGEventFlags) {
         let source = CGEventSource(stateID: .combinedSessionState)
         source?.setLocalEventsFilterDuringSuppressionState(
             [.permitLocalMouseEvents, .permitSystemDefinedEvents],
@@ -237,6 +257,8 @@ final class PasteService {
         else { return }
         down.flags = flags
         up.flags = flags
+        down.setIntegerValueField(.eventSourceUserData, value: syntheticEventMarker)
+        up.setIntegerValueField(.eventSourceUserData, value: syntheticEventMarker)
         down.post(tap: .cgSessionEventTap)
         up.post(tap: .cgSessionEventTap)
     }

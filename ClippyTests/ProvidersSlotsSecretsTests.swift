@@ -249,3 +249,13 @@ struct APIKeyDetectorTests {
         #expect(!AIProviderKind.apiProviders.contains(.claudeCode))
     }
 }
+
+struct ContextMenuTests {
+    @Test func onlyTheChosenModifierAloneTriggers() {
+        #expect(ContextMenuController.matches(.maskCommand, .command))
+        #expect(!ContextMenuController.matches([], .command))                          // plain right-click
+        #expect(!ContextMenuController.matches([.maskCommand, .maskShift], .command))   // other combos untouched
+        #expect(ContextMenuController.matches([.maskAlternate, .maskNonCoalesced], .option))
+        #expect(!ContextMenuController.matches(.maskCommand, .option))
+    }
+}
