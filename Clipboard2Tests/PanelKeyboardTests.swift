@@ -103,6 +103,9 @@ struct PanelKeyboardTests {
     }
 
     @Test func unknownActionTextBecomesAnAIInstruction() {
+        let previous = env.prefs.aiProvider
+        env.prefs.aiProvider = .custom          // needs no key, so AI counts as set up
+        defer { env.prefs.aiProvider = previous }
         let item = env.store.ingest(.text("instr-test \(UUID())"))
         defer { env.store.delete(item) }
         model.query = "instr-test"
@@ -114,7 +117,27 @@ struct PanelKeyboardTests {
         #expect(model.filteredActions == [.ai(.instruction("zzqxj"))])
     }
 
+    @Test func withoutAIConfiguredOnlySetUpIsOffered() {
+        let previous = env.prefs.aiProvider
+        env.prefs.aiProvider = .chatGPT         // signed-out account in the test host
+        defer { env.prefs.aiProvider = previous }
+        guard !env.isAIReady else { return }
+        let item = env.store.ingest(.text("setup-test \(UUID())"))
+        defer { env.store.delete(item) }
+        model.query = "setup-test"
+        model.refresh(resetSelection: true)
+        model.openActions()
+        #expect(model.availableActions.contains(.setUpAI))
+        #expect(!model.availableActions.contains(.ai(.summarize)))
+        model.actionQuery = "make it a haiku"
+        #expect(model.filteredActions == [.setUpAI])
+        #expect(model.aiName == "AI")
+    }
+
     @Test func selectionModeOffersOnlyTransientActions() {
+        let previous = env.prefs.aiProvider
+        env.prefs.aiProvider = .custom
+        defer { env.prefs.aiProvider = previous }
         let before = env.store.count()
         model.prepareForSelection("selected words", target: nil)
         #expect(model.mode == .actions)

@@ -141,22 +141,22 @@ struct SecretVaultTests {
 struct ClaudeAccountTests {
     @Test func parsesSignedOutStatus() {
         let json = #"{"loggedIn": false, "authMethod": "none", "apiProvider": "firstParty"}"#
-        #expect(ClaudeCodeAccount.parseStatus(json) == .signedOut)
+        #expect(SubscriptionCLI.claude.parseStatus(json) == .signedOut)
     }
 
     @Test func parsesSignedInStatusWithEmailAndNoise() {
         let output = "warning: something\n{\"loggedIn\": true, \"authMethod\": \"claudeai\", \"email\": \"admin@softmaze.at\"}\n"
-        #expect(ClaudeCodeAccount.parseStatus(output) == .signedIn(account: "admin@softmaze.at"))
+        #expect(SubscriptionCLI.claude.parseStatus(output) == .signedIn(account: "admin@softmaze.at"))
     }
 
     @Test func garbageIsNotAStatus() {
-        #expect(ClaudeCodeAccount.parseStatus("command not found") == nil)
+        #expect(SubscriptionCLI.claude.parseStatus("command not found") == nil)
     }
 
     @Test func extractsHTTPSLoginURL() {
         let line = "Browser didn't open? Use: https://claude.ai/oauth/authorize?code=true&client_id=x"
-        #expect(ClaudeCodeAccount.firstURL(in: line)?.host() == "claude.ai")
-        #expect(ClaudeCodeAccount.firstURL(in: "no url here") == nil)
+        #expect(SubscriptionAccount.firstURL(in: line)?.host() == "claude.ai")
+        #expect(SubscriptionAccount.firstURL(in: "no url here") == nil)
     }
 
     @Test func notLoggedInMapsToSignInError() {
@@ -257,5 +257,36 @@ struct ContextMenuTests {
         #expect(!ContextMenuController.matches([.maskCommand, .maskShift], .command))   // other combos untouched
         #expect(ContextMenuController.matches([.maskAlternate, .maskNonCoalesced], .option))
         #expect(!ContextMenuController.matches(.maskCommand, .option))
+    }
+}
+
+
+struct CodexProviderTests {
+    @Test func parsesCodexStatus() {
+        #expect(SubscriptionCLI.codex.parseStatus("Logged in using ChatGPT\n") == .signedIn(account: "ChatGPT account"))
+        #expect(SubscriptionCLI.codex.parseStatus("Not logged in") == .signedOut)
+        #expect(SubscriptionCLI.codex.parseStatus("boom") == nil)
+    }
+
+    @Test func parsesCodexExecEvents() {
+        let message = #"{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Guten Morgen"}}"#
+        #expect(CodexCLIClient.parse(line: message) == .message("Guten Morgen"))
+        let warning = #"{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata not found"}}"#
+        #expect(CodexCLIClient.parse(line: warning) == .other)
+        let failed = #"{"type":"turn.failed","error":{"message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'x' model is not supported\"}}"}}"#
+        #expect(CodexCLIClient.parse(line: failed) == .failure("The 'x' model is not supported"))
+    }
+
+    @Test func execArgumentsAreSandboxedAndIgnoreUserConfig() {
+        let args = CodexCLIClient(model: "gpt-5.5").arguments()
+        #expect(args.first == "exec")
+        #expect(args.contains("--ephemeral") && args.contains("--ignore-user-config"))
+        #expect(args.firstIndex(of: "--sandbox").map { args[$0 + 1] } == "read-only")
+        #expect(args.last == "-")
+    }
+
+    @Test func subscriptionProvidersAreNotAPIProviders() {
+        #expect(!AIProviderKind.apiProviders.contains(.chatGPT))
+        #expect(AIProviderKind.chatGPT.isSubscription && !AIProviderKind.chatGPT.requiresAPIKey)
     }
 }

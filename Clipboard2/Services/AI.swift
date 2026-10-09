@@ -52,6 +52,7 @@ nonisolated enum Keychain {
 
 nonisolated enum AIProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
     case claudeCode
+    case chatGPT
     case anthropic
     case openAI
     case gemini
@@ -65,11 +66,15 @@ nonisolated enum AIProviderKind: String, CaseIterable, Codable, Identifiable, Se
     var id: String { rawValue }
 
     /// Every provider reached with an API key (everything except the Claude subscription).
-    static let apiProviders: [AIProviderKind] = allCases.filter { $0 != .claudeCode }
+    static let apiProviders: [AIProviderKind] = allCases.filter { !$0.isSubscription }
+
+    /// Signed in with a consumer plan through the vendor's own CLI, rather than an API key.
+    var isSubscription: Bool { self == .claudeCode || self == .chatGPT }
 
     var title: String {
         switch self {
         case .claudeCode: "Claude — sign in with your account"
+        case .chatGPT: "ChatGPT — sign in with your account"
         case .anthropic: "Anthropic (Claude)"
         case .openAI: "OpenAI (GPT)"
         case .gemini: "Google Gemini"
@@ -85,7 +90,7 @@ nonisolated enum AIProviderKind: String, CaseIterable, Codable, Identifiable, Se
     var shortName: String {
         switch self {
         case .anthropic, .claudeCode: "Claude"
-        case .openAI: "GPT"
+        case .openAI, .chatGPT: "GPT"
         case .gemini: "Gemini"
         case .deepSeek: "DeepSeek"
         case .groq: "Groq"
@@ -107,7 +112,7 @@ nonisolated enum AIProviderKind: String, CaseIterable, Codable, Identifiable, Se
         case .mistral: "https://api.mistral.ai/v1"
         case .openRouter: "https://openrouter.ai/api/v1"
         case .custom: "http://localhost:11434/v1"
-        case .claudeCode: ""
+        case .claudeCode, .chatGPT: ""
         }
     }
 
@@ -119,6 +124,7 @@ nonisolated enum AIProviderKind: String, CaseIterable, Codable, Identifiable, Se
         case .deepSeek: "deepseek-flash"
         case .openRouter: "openrouter/auto"
         case .claudeCode: "sonnet"
+        case .chatGPT: "gpt-5.5"
         case .gemini, .groq, .xai, .mistral, .custom: ""
         }
     }
@@ -137,12 +143,12 @@ nonisolated enum AIProviderKind: String, CaseIterable, Codable, Identifiable, Se
     /// Custom endpoints (Ollama, LM Studio, …) often run without a key.
     var requiresAPIKey: Bool {
         switch self {
-        case .custom, .claudeCode: false
+        case .custom, .claudeCode, .chatGPT: false
         default: true
         }
     }
 
-    var usesAPIKey: Bool { self != .claudeCode }
+    var usesAPIKey: Bool { !isSubscription }
     var hasEditableBaseURL: Bool { self == .custom }
 
     var keychainAccount: String {
@@ -271,6 +277,7 @@ nonisolated enum AIError: LocalizedError, Equatable {
     case invalidResponse
     case cliNotFound
     case notSignedIn
+    case codexNotFound
 
     var errorDescription: String? {
         switch self {
@@ -282,13 +289,14 @@ nonisolated enum AIError: LocalizedError, Equatable {
         case .refusal: "The model declined this request."
         case .invalidResponse: "Unexpected response from the API."
         case .cliNotFound: "Claude isn't set up yet. Open Settings → AI to install it and sign in."
-        case .notSignedIn: "Sign in with your Claude account in Settings → AI."
+        case .notSignedIn: "Sign in with your account in Settings → AI."
+        case .codexNotFound: "ChatGPT isn't set up yet. Open Settings → AI to install it and sign in."
         }
     }
 
     var needsSettings: Bool {
         switch self {
-        case .missingAPIKey, .missingModel, .badURL, .cliNotFound, .notSignedIn: true
+        case .missingAPIKey, .missingModel, .badURL, .cliNotFound, .notSignedIn, .codexNotFound: true
         default: false
         }
     }
@@ -609,10 +617,11 @@ nonisolated final class ProcessBox: @unchecked Sendable {
     private let lock = NSLock()
     private var process: Process?
 
-    func launch(executable: URL, arguments: [String]) throws -> (stdout: FileHandle, stdin: FileHandle) {
+    func launch(executable: URL, arguments: [String], environment: [String: String]? = nil) throws -> (stdout: FileHandle, stdin: FileHandle) {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
+        if let environment { process.environment = environment }
         // An empty working directory keeps project CLAUDE.md files out of the prompt.
         let workdir = FileManager.default.temporaryDirectory.appending(path: "clippy-cli", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: workdir, withIntermediateDirectories: true)
@@ -639,10 +648,113 @@ nonisolated final class ProcessBox: @unchecked Sendable {
     }
 }
 
+/// Uses OpenAI's Codex CLI (`codex exec`), signed in with the user's ChatGPT plan.
+nonisolated struct CodexCLIClient: AIStreamingClient {
+    var model: String
+
+    /// Codex is usually an npm global (often under nvm), so look in the common places.
+    static var executableURL: URL? {
+        let fm = FileManager.default
+        let home = NSHomeDirectory()
+        var candidates = ["\(home)/.local/bin/codex", "/opt/homebrew/bin/codex", "/usr/local/bin/codex",
+                          "\(home)/.bun/bin/codex", "\(home)/.volta/bin/codex", "\(home)/.npm-global/bin/codex"]
+        let nvm = "\(home)/.nvm/versions/node"
+        if let versions = try? fm.contentsOfDirectory(atPath: nvm) {
+            candidates += versions.sorted { $0.compare($1, options: .numeric) == .orderedDescending }
+                .map { "\(nvm)/\($0)/bin/codex" }
+        }
+        return candidates.first(where: fm.isExecutableFile).map(URL.init(fileURLWithPath:))
+    }
+
+    /// `codex` is a Node script; GUI apps get a minimal PATH, so put its own bin dir (with node) first.
+    static func environment(for executable: URL) -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        environment["PATH"] = executable.deletingLastPathComponent().path + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        return environment
+    }
+
+    func arguments() -> [String] {
+        var args = ["exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only",
+                    "--ignore-rules", "--ignore-user-config", "--json"]
+        if !model.isEmpty { args += ["-m", model] }
+        return args + ["-"]   // prompt from stdin
+    }
+
+    enum LineEvent: Equatable { case message(String), failure(String), other }
+
+    static func parse(line: String) -> LineEvent {
+        guard let data = line.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["type"] as? String
+        else { return .other }
+        switch type {
+        case "item.completed":
+            let item = json["item"] as? [String: Any]
+            guard item?["type"] as? String == "agent_message", let text = item?["text"] as? String else { return .other }
+            return .message(text)
+        case "turn.failed", "error":
+            let raw = (json["error"] as? [String: Any])?["message"] as? String ?? json["message"] as? String ?? "Unknown error"
+            return .failure(innerMessage(raw))
+        default:
+            return .other
+        }
+    }
+
+    /// Codex wraps API errors as a JSON string; pull out the human-readable message.
+    static func innerMessage(_ raw: String) -> String {
+        guard let data = raw.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let message = (json["error"] as? [String: Any])?["message"] as? String
+        else { return raw }
+        return message
+    }
+
+    func stream(system: String, user: String) -> AsyncThrowingStream<String, Error> {
+        let arguments = arguments()
+        let prompt = system + "\n\n" + user
+        return AsyncThrowingStream { continuation in
+            guard let executable = Self.executableURL else {
+                continuation.finish(throwing: AIError.codexNotFound)
+                return
+            }
+            let process = ProcessBox()
+            let task = Task {
+                do {
+                    let (stdout, stdin) = try process.launch(executable: executable, arguments: arguments,
+                                                             environment: Self.environment(for: executable))
+                    stdin.write(Data(prompt.utf8))
+                    try? stdin.close()
+                    for try await line in stdout.bytes.lines {
+                        switch Self.parse(line: line) {
+                        case .message(let text):
+                            continuation.yield(text)
+                        case .failure(let message):
+                            let lower = message.lowercased()
+                            if lower.contains("not logged in") || lower.contains("401") || lower.contains("unauthorized") || lower.contains("login") {
+                                throw AIError.notSignedIn
+                            }
+                            throw AIError.api(message)
+                        case .other:
+                            break
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
+                process.terminate()
+            }
+        }
+    }
+}
+
 nonisolated enum AIClientFactory {
     static func make(provider: AIProviderKind, model: String, customBaseURL: String) throws -> any AIStreamingClient {
         let model = model.trimmingCharacters(in: .whitespaces)
-        if provider != .claudeCode, model.isEmpty { throw AIError.missingModel }
+        if !provider.isSubscription, model.isEmpty { throw AIError.missingModel }
         let key = provider.apiKey
         if provider.requiresAPIKey, key == nil { throw AIError.missingAPIKey(provider) }
 
@@ -658,6 +770,8 @@ nonisolated enum AIClientFactory {
             return OpenAICompatibleClient(baseURL: customBaseURL, apiKey: key, model: model)
         case .claudeCode:
             return ClaudeCodeCLIClient(model: model)
+        case .chatGPT:
+            return CodexCLIClient(model: model)
         }
     }
 }
@@ -667,6 +781,7 @@ nonisolated enum AIModelLister {
     /// `apiKey` overrides the stored key (used while detecting a freshly pasted key).
     static func fetch(provider: AIProviderKind, customBaseURL: String, apiKey: String? = nil) async throws -> [String] {
         if provider == .claudeCode { return ["sonnet", "opus", "haiku"] }
+        if provider == .chatGPT { return AIModelCatalog.chatGPTModels() }
         let base = (provider == .custom ? customBaseURL : provider.defaultBaseURL)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
         guard let url = URL(string: base + "/models") else { throw AIError.badURL }
@@ -775,14 +890,27 @@ final class AIModelCatalog {
     /// Short names the Claude Code CLI accepts.
     nonisolated static let claudeCodeModels = ["sonnet", "opus", "haiku"]
 
+    /// Models a ChatGPT login may use, from Codex's own cache (falls back to the known default).
+    nonisolated static func chatGPTModels() -> [String] {
+        let url = URL(fileURLWithPath: NSHomeDirectory()).appending(path: ".codex/models_cache.json")
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data),
+              let list = (json as? [[String: Any]]) ?? ((json as? [String: Any])?["models"] as? [[String: Any]])
+        else { return ["gpt-5.5"] }
+        let slugs = list.compactMap { ($0["slug"] ?? $0["id"]) as? String }.filter { !$0.contains("review") }
+        return slugs.isEmpty ? ["gpt-5.5"] : slugs
+    }
+
     func models(for provider: AIProviderKind, current: String) -> [String] {
-        var list = provider == .claudeCode ? Self.claudeCodeModels : (models[provider] ?? [])
+        var list = provider == .claudeCode ? Self.claudeCodeModels
+            : provider == .chatGPT ? Self.chatGPTModels()
+            : (models[provider] ?? [])
         if !current.isEmpty, !list.contains(current) { list.insert(current, at: 0) }
         return list
     }
 
     func loadIfNeeded(_ provider: AIProviderKind, customBaseURL: String) {
-        guard provider != .claudeCode, models[provider] == nil, !loading.contains(provider) else { return }
+        guard !provider.isSubscription, models[provider] == nil, !loading.contains(provider) else { return }
         loading.insert(provider)
         Task {
             do {

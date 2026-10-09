@@ -294,12 +294,12 @@ struct ModelPickerMenu: View {
                 }
                 if catalog.loading.contains(provider) {
                     Text("Loading models…")
-                } else if let error = catalog.errors[provider], provider != .claudeCode {
+                } else if let error = catalog.errors[provider], !provider.isSubscription {
                     Text(error)
                 }
             }
             Divider()
-            if provider != .claudeCode {
+            if !provider.isSubscription {
                 Button("Refresh Models") { catalog.reload(provider, customBaseURL: prefs.customBaseURL) }
             }
             Button("Change Provider…") {

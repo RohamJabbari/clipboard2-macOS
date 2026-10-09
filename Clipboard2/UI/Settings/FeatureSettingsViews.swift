@@ -130,7 +130,10 @@ struct TransformsSettingsView: View {
                         .labelsHidden()
                         .frame(width: 190)
                         Button {
-                            prefs.appTransforms.removeAll { $0.id == rule.id }
+                            // Read the id first: `rule` is a binding into the array being mutated,
+                            // and reading it inside removeAll is an exclusivity violation (crash).
+                            let id = rule.id
+                            prefs.appTransforms.removeAll { $0.id == id }
                         } label: {
                             Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
                         }
@@ -174,7 +177,7 @@ struct AISettingsView: View {
         case idle, running, ok, failed(String)
     }
 
-    private enum Mode: Hashable { case subscription, apiKey }
+    private enum Mode: Hashable { case claude, chatGPT, apiKey }
 
     var body: some View {
         @Bindable var prefs = env.prefs
@@ -182,18 +185,20 @@ struct AISettingsView: View {
         Form {
             Section {
                 Picker("Use", selection: modeBinding) {
-                    Text("Claude — sign in with your account").tag(Mode.subscription)
+                    Text("Claude — sign in with your account").tag(Mode.claude)
+                    Text("ChatGPT — sign in with your account").tag(Mode.chatGPT)
                     Text("API key — any provider").tag(Mode.apiKey)
                 }
                 .pickerStyle(.radioGroup)
 
-                if provider == .claudeCode {
-                    ClaudeAccountRow(account: env.claudeAccount)
+                if let account = env.account(for: provider) {
+                    SubscriptionAccountRow(account: account)
+                        .id(provider)
                 } else {
                     apiKeyRows(provider: provider)
                 }
 
-                if provider != .claudeCode || env.claudeAccount.isSignedIn {
+                if env.account(for: provider)?.isSignedIn ?? true {
                     LabeledContent("Model") {
                         HStack {
                             TextField("Model", text: $prefs.aiModel, prompt: Text("model-id"))
@@ -233,7 +238,8 @@ struct AISettingsView: View {
                                 .labelsHidden()
                                 .font(.headline)
                             Button {
-                                prefs.customPrompts.removeAll { $0.id == prompt.id }
+                                let id = prompt.id   // see appTransforms: never read the binding mid-mutation
+                                prefs.customPrompts.removeAll { $0.id == id }
                             } label: {
                                 Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
                             }
@@ -346,11 +352,19 @@ struct AISettingsView: View {
 
     private var modeBinding: Binding<Mode> {
         Binding(
-            get: { env.prefs.aiProvider == .claudeCode ? .subscription : .apiKey },
+            get: {
+                switch env.prefs.aiProvider {
+                case .claudeCode: .claude
+                case .chatGPT: .chatGPT
+                default: .apiKey
+                }
+            },
             set: { mode in
                 switch mode {
-                case .subscription:
+                case .claude:
                     env.prefs.aiProvider = .claudeCode
+                case .chatGPT:
+                    env.prefs.aiProvider = .chatGPT
                 case .apiKey:
                     // Prefer a provider that already has a key stored.
                     env.prefs.aiProvider = AIProviderKind.apiProviders.first { $0.apiKey != nil } ?? .anthropic
@@ -427,8 +441,8 @@ struct AISettingsView: View {
 
 // MARK: - Claude subscription account
 
-struct ClaudeAccountRow: View {
-    let account: ClaudeCodeAccount
+struct SubscriptionAccountRow: View {
+    let account: SubscriptionAccount
     @State private var code = ""
 
     var body: some View {
@@ -459,7 +473,7 @@ struct ClaudeAccountRow: View {
                     }
                 }
             }
-            Text("Uses your Claude Pro or Max plan, with no API key and no API billing. Requests take a few seconds longer to start than with an API key.")
+            Text("Uses your \(account.cli.planName) plan through \(account.cli.toolName), with no API key and no API billing. Requests take a few seconds longer to start than with an API key.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -498,10 +512,10 @@ struct ClaudeAccountRow: View {
     private var actions: some View {
         switch account.state {
         case .notInstalled:
-            Button("Set Up Claude") { Task { await account.install(); if case .signedOut = account.state { account.signIn() } } }
-                .help("Installs Anthropic's Claude Code (no admin rights needed), then signs you in")
+            Button("Set Up \(account.cli.serviceName)") { Task { await account.install(); if case .signedOut = account.state { account.signIn() } } }
+                .help("Installs \(account.cli.toolName) (no admin rights needed), then signs you in")
         case .signedOut, .failed:
-            Button("Sign in with Claude") { account.signIn() }
+            Button("Sign in with \(account.cli.serviceName)") { account.signIn() }
                 .buttonStyle(.borderedProminent)
         case .signingIn:
             Button("Cancel") { account.cancelSignIn(); Task { await account.refresh() } }

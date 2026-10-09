@@ -29,7 +29,8 @@ final class AppEnvironment {
     let snippets: SnippetStore
     let secrets: SecretStore
     let slots: QuickSlots
-    let claudeAccount = ClaudeCodeAccount()
+    let claudeAccount = SubscriptionAccount(cli: .claude)
+    let chatGPTAccount = SubscriptionAccount(cli: .codex)
     let modelCatalog = AIModelCatalog()
 
     @ObservationIgnored private(set) lazy var panel = QuickPanelController(env: self)
@@ -114,6 +115,10 @@ final class AppEnvironment {
             self?.pasteClipboardAsText()
         }
         contextMenu.update()
+        Task {
+            await claudeAccount.refresh()
+            await chatGPTAccount.refresh()
+        }
         NSApp.servicesProvider = serviceProvider
         NSUpdateDynamicServices()
         for (index, name) in KeyboardShortcuts.Name.quickSlots.enumerated() {
@@ -134,6 +139,22 @@ final class AppEnvironment {
             prefs.hasShownPermissions = true
             showPermissions()
         }
+    }
+
+    /// The signed-in account behind a subscription provider, if it is one.
+    func account(for provider: AIProviderKind) -> SubscriptionAccount? {
+        switch provider {
+        case .claudeCode: claudeAccount
+        case .chatGPT: chatGPTAccount
+        default: nil
+        }
+    }
+
+    /// Whether the chosen AI provider can actually be used right now.
+    var isAIReady: Bool {
+        let provider = prefs.aiProvider
+        if let account = account(for: provider) { return account.isSignedIn }
+        return !provider.requiresAPIKey || provider.apiKey != nil
     }
 
     func showPermissions() {

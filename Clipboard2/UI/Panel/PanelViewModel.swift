@@ -76,6 +76,7 @@ enum PanelAction: Identifiable, Hashable {
     case ai(AIAction)
     case saveAsSecret
     case setLabel
+    case setUpAI
     case clearSlot(Int)
     case togglePin
     case delete
@@ -89,6 +90,7 @@ enum PanelAction: Identifiable, Hashable {
         case .ai(let a): "ai-" + a.id
         case .saveAsSecret: "saveAsSecret"
         case .setLabel: "setLabel"
+        case .setUpAI: "setUpAI"
         case .clearSlot(let n): "clearSlot-\(n)"
         case .togglePin: "pin"
         case .delete: "delete"
@@ -99,7 +101,7 @@ enum PanelAction: Identifiable, Hashable {
         switch self {
         case .paste, .pastePlain, .copy: "Paste"
         case .transform: "Transform & Paste"
-        case .ai: "Ask \(aiName)"
+        case .ai, .setUpAI: "Ask \(aiName)"
         case .saveAsSecret, .setLabel, .clearSlot, .togglePin, .delete: "Item"
         }
     }
@@ -114,6 +116,7 @@ enum PanelAction: Identifiable, Hashable {
         case .ai(let a): a.title
         case .saveAsSecret: "Save as Secret…"
         case .setLabel: "Label…"
+        case .setUpAI: "Set Up AI…"
         case .clearSlot(let n): "Remove from Quick Slot ⌘\(n)"
         case .togglePin: isPinned ? "Unpin" : "Pin"
         case .delete: "Delete"
@@ -129,6 +132,7 @@ enum PanelAction: Identifiable, Hashable {
         case .ai(let a): a.symbol
         case .saveAsSecret: "key"
         case .setLabel: "tag"
+        case .setUpAI: "sparkles"
         case .clearSlot: "number.square"
         case .togglePin: "pin"
         case .delete: "trash"
@@ -594,7 +598,14 @@ final class PanelViewModel {
         mode = .actions
     }
 
-    var aiName: String { env.prefs.aiProvider.shortName }
+    var aiName: String { env.isAIReady ? env.prefs.aiProvider.shortName : "AI" }
+
+    /// AI rows for the action menu: the real actions once a provider is set up, otherwise a
+    /// single "Set Up AI…" so nothing pretends to be ready.
+    private var aiActions: [PanelAction] {
+        guard env.isAIReady else { return [.setUpAI] }
+        return AIAction.builtIn.map(PanelAction.ai) + env.prefs.customPrompts.map { PanelAction.ai(.custom($0)) }
+    }
 
     var availableActions: [PanelAction] {
         if isMultiSelecting {
@@ -616,8 +627,7 @@ final class PanelViewModel {
         case .clip(let item) where item.isTransient:
             // Selected text from another app: only transform it, ask AI, or keep it.
             actions = [.copy]
-            actions += AIAction.builtIn.map(PanelAction.ai)
-            actions += env.prefs.customPrompts.map { PanelAction.ai(.custom($0)) }
+            actions += aiActions
             actions += Transform.allCases.filter { $0 != .plainText }.map(PanelAction.transform)
             actions.append(.saveAsSecret)
             return actions
@@ -626,8 +636,7 @@ final class PanelViewModel {
             actions.append(.copy)
             if item.kind.isTextual {
                 actions += Transform.allCases.filter { $0 != .plainText }.map(PanelAction.transform)
-                actions += AIAction.builtIn.map(PanelAction.ai)
-                actions += env.prefs.customPrompts.map { PanelAction.ai(.custom($0)) }
+                actions += aiActions
                 actions.append(.saveAsSecret)
             }
             actions.append(.setLabel)
@@ -660,7 +669,11 @@ final class PanelViewModel {
             .map(\.0)
         // Anything typed can also be sent as a one-off instruction for the selected text.
         if !isMultiSelecting, selectedEntry?.clip?.kind.isTextual == true {
-            matches.append(.ai(.instruction(q)))
+            if env.isAIReady {
+                matches.append(.ai(.instruction(q)))
+            } else if !matches.contains(.setUpAI) {
+                matches.append(.setUpAI)
+            }
         }
         return matches
     }
@@ -705,6 +718,9 @@ final class PanelViewModel {
             beginSaveSecret(item)
         case .setLabel:
             beginLabel(entry)
+        case .setUpAI:
+            onClose()
+            SettingsOpener.open()
         case .clearSlot(let number):
             env.slots.clear(number)
             mode = .browse

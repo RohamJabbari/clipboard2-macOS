@@ -89,14 +89,19 @@ struct QuickPanelView: View {
                                          isSelected: model.isSelected(entry),
                                          showsCheckmark: model.isMultiSelecting)
                                     .id(entry.id)
-                                    .onTapGesture(count: 2) {
-                                        if model.isMultiSelecting && model.isSelected(entry) {
-                                            model.pasteSelection()
+                                    // One recogniser reading AppKit's click count: SwiftUI's stacked
+                                    // count:2 / count:1 gestures miss double-clicks in a non-activating panel.
+                                    .onTapGesture {
+                                        if (NSApp.currentEvent?.clickCount ?? 1) >= 2 {
+                                            if model.isMultiSelecting && model.isSelected(entry) {
+                                                model.pasteSelection()
+                                            } else {
+                                                model.activate(entry)
+                                            }
                                         } else {
-                                            model.activate(entry)
+                                            model.click(entry)
                                         }
                                     }
-                                    .onTapGesture { model.click(entry) }
                                     .contextMenu { contextMenu(for: entry) }
                             }
                         }
