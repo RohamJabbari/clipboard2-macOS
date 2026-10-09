@@ -202,3 +202,18 @@ struct UnlockDurationTests {
         #expect(!secrets.isUnlocked)
     }
 }
+
+struct ModelCatalogTests {
+    @MainActor @Test func claudeSubscriptionListsAliasesAndKeepsCurrent() {
+        let catalog = AIModelCatalog()
+        #expect(catalog.models(for: .claudeCode, current: "sonnet") == ["sonnet", "opus", "haiku"])
+        #expect(catalog.models(for: .claudeCode, current: "claude-opus-5-5").first == "claude-opus-5-5")
+        #expect(AIModelCatalog.displayName("opus") == "Opus")
+    }
+
+    @Test func openAIListDropsNonChatModels() {
+        let ids = ["gpt-5.6", "text-embedding-3-large", "whisper-1", "gpt-5.6-luna", "dall-e-3", "tts-1"]
+        #expect(AIModelCatalog.relevant(ids, for: .openAI) == ["gpt-5.6", "gpt-5.6-luna"])
+        #expect(AIModelCatalog.relevant(ids, for: .openRouter) == ids)
+    }
+}

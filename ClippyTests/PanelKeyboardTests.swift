@@ -81,4 +81,36 @@ struct PanelKeyboardTests {
         #expect(model.selectedIDs == Set(ids[1...3]))
         #expect(model.selectedClips.count == 3)
     }
+
+    @Test func textEditingDeletesPassThroughWhenSearching() {
+        model.query = "abc def"
+        #expect(model.handleKeyDown(key(KeyCode.delete, "\u{7f}", flags: .command)) == false)
+        #expect(model.handleKeyDown(key(KeyCode.delete, "\u{7f}", flags: .option)) == false)
+    }
+
+    @Test func actionModeLetsTypingReachTheFilterField() {
+        let item = env.store.ingest(.text("action-test \(UUID())"))
+        defer { env.store.delete(item) }
+        model.query = "action-test"
+        model.refresh(resetSelection: true)
+        model.openActions()
+        #expect(model.mode == .actions)
+        #expect(model.handleKeyDown(key(0, "a")) == false)
+        #expect(model.handleKeyDown(key(KeyCode.delete, "\u{7f}", flags: .option)) == false)
+        #expect(model.handleKeyDown(key(KeyCode.downArrow, "")))
+        #expect(model.handleKeyDown(key(KeyCode.escape, "\u{1b}")))
+        #expect(model.mode == .browse)
+    }
+
+    @Test func unknownActionTextBecomesAnAIInstruction() {
+        let item = env.store.ingest(.text("instr-test \(UUID())"))
+        defer { env.store.delete(item) }
+        model.query = "instr-test"
+        model.refresh(resetSelection: true)
+        model.openActions()
+        model.actionQuery = "make it sound like a pirate"
+        #expect(model.filteredActions.last == .ai(.instruction("make it sound like a pirate")))
+        model.actionQuery = "zzqxj"
+        #expect(model.filteredActions == [.ai(.instruction("zzqxj"))])
+    }
 }

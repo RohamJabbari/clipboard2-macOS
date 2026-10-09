@@ -110,6 +110,7 @@ enum PanelAction: Identifiable, Hashable {
         case .pastePlain: "Paste as Plain Text"
         case .copy: "Copy to Clipboard"
         case .transform(let t): t.title
+        case .ai(.instruction(let text)): "“\(text)”"
         case .ai(let a): a.title
         case .saveAsSecret: "Save as Secret…"
         case .setLabel: "Label…"
@@ -213,8 +214,11 @@ final class PanelViewModel {
     /// Bumped each time the panel opens so the view can refocus the search field.
     private(set) var focusToken = 0
 
-    private(set) var mode: PanelMode = .browse
-    var actionQuery = ""
+    private(set) var mode: PanelMode = .browse {
+        // Returning to the list hands keyboard focus back to the search field.
+        didSet { if mode == .browse && oldValue != .browse { focusToken &+= 1 } }
+    }
+    var actionQuery = "" { didSet { if actionQuery != oldValue { actionSelection = 0 } } }
     var actionSelection = 0
     private(set) var snippetForm: SnippetFormState?
     private(set) var saveSecretForm: SaveSecretState?
@@ -616,13 +620,18 @@ final class PanelViewModel {
         let isPinned = selectedEntry?.clip?.isPinned ?? false
         let q = actionQuery.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return availableActions }
-        return availableActions
+        var matches = availableActions
             .compactMap { action in
                 FuzzyMatcher.score(query: q, in: action.title(isPinned: isPinned) + " " + action.section(aiName: aiName))
                     .map { (action, $0) }
             }
             .sorted { $0.1 > $1.1 }
             .map(\.0)
+        // Anything typed can also be sent as a one-off instruction for the selected text.
+        if !isMultiSelecting, selectedEntry?.clip?.kind.isTextual == true {
+            matches.append(.ai(.instruction(q)))
+        }
+        return matches
     }
 
     func perform(_ action: PanelAction) {
@@ -708,6 +717,15 @@ final class PanelViewModel {
     }
 
     // MARK: AI result
+
+    /// Runs the same action again (e.g. after switching model).
+    func rerunAI() {
+        guard let old = aiRun else { return }
+        old.cancel()
+        let run = AIRun(action: old.action, item: old.item, providerName: env.prefs.aiProvider.title)
+        aiRun = run
+        run.start(prefs: env.prefs)
+    }
 
     func pasteAIOutput() {
         guard let run = aiRun, !run.output.isEmpty else { return }
@@ -806,11 +824,11 @@ final class PanelViewModel {
             cycleFilter(forward: !shift)
             return true
         case KeyCode.delete, KeyCode.forwardDelete:
-            if command || query.isEmpty {
-                if isMultiSelecting { deleteSelectedClips() } else { deleteSelection() }
-                return true
-            }
-            return false
+            // With text in the search field every delete variant edits the text
+            // (⌥⌫ deletes a word, ⌘⌫ the line); only an empty field deletes items.
+            guard query.isEmpty else { return false }
+            if isMultiSelecting { deleteSelectedClips() } else { deleteSelection() }
+            return true
         default:
             break
         }
@@ -848,6 +866,8 @@ final class PanelViewModel {
         return false
     }
 
+    /// The action filter is a real text field, so typing and text editing (⌥⌫, ⌘⌫, ⌘A…)
+    /// go to it; only navigation keys are intercepted here.
     private func handleActionKey(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let actions = filteredActions
@@ -860,16 +880,9 @@ final class PanelViewModel {
             actionSelection = min(max(0, actions.count - 1), actionSelection + 1)
         case KeyCode.returnKey, KeyCode.keypadEnter:
             if actions.indices.contains(actionSelection) { perform(actions[actionSelection]) }
-        case KeyCode.delete:
-            if !actionQuery.isEmpty { actionQuery.removeLast(); actionSelection = 0 }
         default:
-            if flags.contains(.command) {
-                if event.charactersIgnoringModifiers?.lowercased() == "k" { mode = .browse }
-            } else if let chars = event.characters, !chars.isEmpty,
-                      chars.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) {
-                actionQuery += chars
-                actionSelection = 0
-            }
+            guard flags.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "k" else { return false }
+            mode = .browse
         }
         return true
     }

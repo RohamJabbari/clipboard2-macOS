@@ -26,7 +26,7 @@ struct QuickPanelView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { searchFocused = true }
-        .onChange(of: model.focusToken) { searchFocused = ![.snippetForm, .saveSecret, .label].contains(model.mode) }
+        .onChange(of: model.focusToken) { searchFocused = ![.actions, .snippetForm, .saveSecret, .label].contains(model.mode) }
         .onChange(of: env.store.revision) { model.refresh() }
         .onChange(of: env.snippets.revision) { model.refresh() }
         .onChange(of: env.secrets.revision) { model.refresh() }

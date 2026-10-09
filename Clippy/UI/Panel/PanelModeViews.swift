@@ -4,24 +4,25 @@ import SwiftUI
 struct ActionMenuView: View {
     @Bindable var model: PanelViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var filterFocused: Bool
 
     var body: some View {
         let actions = model.filteredActions
         let isPinned = model.selectedEntry?.clip?.isPinned ?? false
 
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 Image(systemName: "command")
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
-                Text(model.actionQuery.isEmpty ? "Type to filter actions" : model.actionQuery)
-                    .foregroundStyle(model.actionQuery.isEmpty ? .tertiary : .primary)
-                Spacer()
+                TextField("Filter actions", text: $model.actionQuery, prompt: Text("Filter actions or ask \(model.aiName)"))
+                    .textFieldStyle(.plain)
+                    .focused($filterFocused)
+                    .accessibilityLabel("Filter actions")
+                ModelPickerMenu()
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(model.actionQuery.isEmpty ? "Actions" : "Actions matching \(model.actionQuery)")
 
             Divider()
 
@@ -58,6 +59,7 @@ struct ActionMenuView: View {
                 }
             }
         }
+        .onAppear { filterFocused = true }
     }
 }
 
@@ -209,10 +211,8 @@ struct AIResultView: View {
                     .foregroundStyle(.tint)
                     .accessibilityHidden(true)
                 Text(run.action.title).font(.headline)
-                Text(run.providerName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 Spacer()
+                ModelPickerMenu { model.rerunAI() }
                 if run.isStreaming {
                     ProgressView().controlSize(.small)
                         .accessibilityLabel("Waiting for the response")
@@ -262,5 +262,60 @@ struct AIResultView: View {
             }
             .padding(12)
         }
+    }
+}
+
+/// Compact menu showing the active provider's models; changing it updates Settings → AI too.
+struct ModelPickerMenu: View {
+    @Environment(AppEnvironment.self) private var env
+    var onChange: (() -> Void)?
+
+    var body: some View {
+        let prefs = env.prefs
+        let provider = prefs.aiProvider
+        let catalog = env.modelCatalog
+        let models = catalog.models(for: provider, current: prefs.aiModel)
+
+        Menu {
+            Section(provider.title) {
+                ForEach(models, id: \.self) { id in
+                    Button {
+                        prefs.aiModel = id
+                        onChange?()
+                    } label: {
+                        if id == prefs.aiModel {
+                            Label(AIModelCatalog.displayName(id), systemImage: "checkmark")
+                        } else {
+                            Text(AIModelCatalog.displayName(id))
+                        }
+                    }
+                }
+                if catalog.loading.contains(provider) {
+                    Text("Loading models…")
+                } else if let error = catalog.errors[provider], provider != .claudeCode {
+                    Text(error)
+                }
+            }
+            Divider()
+            if provider != .claudeCode {
+                Button("Refresh Models") { catalog.reload(provider, customBaseURL: prefs.customBaseURL) }
+            }
+            Button("Change Provider…") {
+                env.panel.close()
+                SettingsOpener.open()
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles")
+                Text(prefs.aiModel.isEmpty ? "Choose model" : AIModelCatalog.displayName(prefs.aiModel))
+                    .lineLimit(1)
+            }
+            .font(.caption)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("\(provider.title) model")
+        .accessibilityLabel("Model: \(prefs.aiModel)")
+        .onAppear { catalog.loadIfNeeded(provider, customBaseURL: prefs.customBaseURL) }
     }
 }

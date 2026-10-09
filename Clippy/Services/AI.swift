@@ -139,6 +139,8 @@ nonisolated enum AIAction: Hashable, Identifiable, Sendable {
     case fixGrammar
     case explain
     case custom(CustomPrompt)
+    /// Free-form instruction typed into the ⌘K filter.
+    case instruction(String)
 
     static let builtIn: [AIAction] = [
         .translate(language: "English"),
@@ -156,6 +158,7 @@ nonisolated enum AIAction: Hashable, Identifiable, Sendable {
         case .fixGrammar: "fixGrammar"
         case .explain: "explain"
         case .custom(let prompt): "custom-\(prompt.id.uuidString)"
+        case .instruction(let text): "instruction-\(text)"
         }
     }
 
@@ -166,6 +169,7 @@ nonisolated enum AIAction: Hashable, Identifiable, Sendable {
         case .fixGrammar: "Fix Grammar"
         case .explain: "Explain"
         case .custom(let prompt): prompt.name.isEmpty ? "Custom Prompt" : prompt.name
+        case .instruction(let text): text
         }
     }
 
@@ -175,7 +179,7 @@ nonisolated enum AIAction: Hashable, Identifiable, Sendable {
         case .summarize: "text.line.first.and.arrowtriangle.forward"
         case .fixGrammar: "checkmark.seal"
         case .explain: "questionmark.bubble"
-        case .custom: "sparkles"
+        case .custom, .instruction: "sparkles"
         }
     }
 
@@ -192,6 +196,8 @@ nonisolated enum AIAction: Hashable, Identifiable, Sendable {
             return "Explain the input clearly and concisely for a smart reader. If it is code, explain what it does. Answer in the language of the input unless it is code. The input is the text inside the <text> tags."
         case .custom(let prompt):
             return "\(prompt.prompt)\n\n\(suffix)"
+        case .instruction(let text):
+            return "Do the following with the input: \(text)\n\nIf it asks a question about the input, answer it concisely. Otherwise reply with the resulting text only — no preamble, quotes or commentary. The input is the text inside the <text> tags."
         }
     }
 
@@ -691,5 +697,56 @@ final class AIRun {
         task?.cancel()
         task = nil
         isStreaming = false
+    }
+}
+
+// MARK: - Model catalog
+
+/// Per-provider model lists for the in-panel model menu, fetched once per session.
+@Observable
+final class AIModelCatalog {
+    private(set) var models: [AIProviderKind: [String]] = [:]
+    private(set) var loading: Set<AIProviderKind> = []
+    private(set) var errors: [AIProviderKind: String] = [:]
+
+    /// Short names the Claude Code CLI accepts.
+    nonisolated static let claudeCodeModels = ["sonnet", "opus", "haiku"]
+
+    func models(for provider: AIProviderKind, current: String) -> [String] {
+        var list = provider == .claudeCode ? Self.claudeCodeModels : (models[provider] ?? [])
+        if !current.isEmpty, !list.contains(current) { list.insert(current, at: 0) }
+        return list
+    }
+
+    func loadIfNeeded(_ provider: AIProviderKind, customBaseURL: String) {
+        guard provider != .claudeCode, models[provider] == nil, !loading.contains(provider) else { return }
+        loading.insert(provider)
+        Task {
+            do {
+                let fetched = try await AIModelLister.fetch(provider: provider, customBaseURL: customBaseURL)
+                models[provider] = Self.relevant(fetched, for: provider)
+                errors[provider] = nil
+            } catch {
+                errors[provider] = error.localizedDescription
+            }
+            loading.remove(provider)
+        }
+    }
+
+    func reload(_ provider: AIProviderKind, customBaseURL: String) {
+        models[provider] = nil
+        loadIfNeeded(provider, customBaseURL: customBaseURL)
+    }
+
+    /// OpenAI's /models also lists embeddings, audio, image and moderation models; keep chat ones.
+    nonisolated static func relevant(_ ids: [String], for provider: AIProviderKind) -> [String] {
+        guard provider == .openAI else { return ids }
+        let excluded = ["embedding", "whisper", "tts", "dall-e", "image", "audio", "moderation", "realtime",
+                        "transcribe", "search", "davinci", "babbage", "sora"]
+        return ids.filter { id in !excluded.contains { id.contains($0) } }
+    }
+
+    nonisolated static func displayName(_ model: String) -> String {
+        claudeCodeModels.contains(model) ? model.capitalized : model
     }
 }
