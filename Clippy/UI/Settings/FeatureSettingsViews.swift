@@ -180,13 +180,23 @@ struct AISettingsView: View {
         Form {
             Section {
                 Picker("Provider", selection: $prefs.aiProvider) {
-                    ForEach(AIProviderKind.allCases) { Text($0.title).tag($0) }
+                    Text(AIProviderKind.claudeCode.title).tag(AIProviderKind.claudeCode)
+                    Divider()
+                    ForEach(AIProviderKind.allCases.filter { $0 != .claudeCode }) { Text($0.title).tag($0) }
                 }
                 if provider == .claudeCode {
                     ClaudeAccountRow(account: env.claudeAccount)
+                } else if provider == .anthropic && !hasKey {
+                    LabeledContent("Have Claude Pro or Max?") {
+                        Button("Use My Claude Subscription") {
+                            prefs.aiProvider = .claudeCode
+                            if !env.claudeAccount.isSignedIn { env.claudeAccount.signIn() }
+                        }
+                    }
                 }
                 if provider.hasEditableBaseURL {
                     TextField("Base URL", text: $prefs.customBaseURL, prompt: Text("http://localhost:11434/v1"))
+                        .frame(minWidth: 300)
                 }
                 if provider.usesAPIKey {
                     if hasKey {
@@ -205,6 +215,8 @@ struct AISettingsView: View {
                             HStack {
                                 SecureField("API key", text: $keyInput, prompt: Text(provider.keyPlaceholder))
                                     .labelsHidden()
+                                    .frame(minWidth: 300)
+                                    .onSubmit { saveKey(for: provider) }
                                 Button("Save") { saveKey(for: provider) }
                                     .disabled(keyInput.trimmingCharacters(in: .whitespaces).isEmpty)
                             }
@@ -215,6 +227,8 @@ struct AISettingsView: View {
                     HStack {
                         TextField("Model", text: $prefs.aiModel, prompt: Text(provider.defaultModel.isEmpty ? "model-id" : provider.defaultModel))
                             .labelsHidden()
+                            .multilineTextAlignment(.trailing)
+                            .frame(minWidth: 220)
                         Menu {
                             if models.isEmpty {
                                 Text(modelsError ?? "No models loaded")

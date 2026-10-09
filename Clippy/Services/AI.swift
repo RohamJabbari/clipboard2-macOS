@@ -51,23 +51,23 @@ nonisolated enum Keychain {
 // MARK: - Providers
 
 nonisolated enum AIProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
+    case claudeCode
     case anthropic
     case openAI
     case deepSeek
     case openRouter
     case custom
-    case claudeCode
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .anthropic: "Anthropic (Claude API)"
+        case .anthropic: "Claude API key"
         case .openAI: "OpenAI"
         case .deepSeek: "DeepSeek"
         case .openRouter: "OpenRouter"
         case .custom: "OpenAI-Compatible (Custom)"
-        case .claudeCode: "Claude (Subscription)"
+        case .claudeCode: "Claude — sign in with your account"
         }
     }
 

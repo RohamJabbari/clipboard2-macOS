@@ -107,7 +107,7 @@ final class Preferences {
             Key.isPaused: false,
             Key.appearance: AppearanceMode.system.rawValue,
             Key.panelSize: PanelSize.regular.rawValue,
-            Key.aiProvider: AIProviderKind.anthropic.rawValue,
+            Key.aiProvider: AIProviderKind.claudeCode.rawValue,
             Key.customBaseURL: AIProviderKind.custom.defaultBaseURL,
             Key.secretGraceMinutes: 15,
             Key.secretClearSeconds: 30,
@@ -119,7 +119,7 @@ final class Preferences {
         panelSize = PanelSize(rawValue: defaults.string(forKey: Key.panelSize) ?? "") ?? .regular
         ignoredApps = Self.load([AppRef].self, defaults, Key.ignoredApps) ?? AppRef.defaultIgnored
         appTransforms = Self.load([AppTransformRule].self, defaults, Key.appTransforms) ?? []
-        aiProvider = AIProviderKind(rawValue: defaults.string(forKey: Key.aiProvider) ?? "") ?? .anthropic
+        aiProvider = AIProviderKind(rawValue: defaults.string(forKey: Key.aiProvider) ?? "") ?? .claudeCode
         var models = defaults.dictionary(forKey: Key.aiModels) as? [String: String] ?? [:]
         if models[AIProviderKind.anthropic.rawValue] == nil, let legacy = defaults.string(forKey: Key.claudeModel) {
             models[AIProviderKind.anthropic.rawValue] = legacy

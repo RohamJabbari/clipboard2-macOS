@@ -1,7 +1,7 @@
 import AppKit
 import Observation
 
-/// In-app sign-in for the "Claude (Subscription)" provider. Drives Anthropic's own Claude Code
+/// In-app sign-in for the "Claude — sign in with your account" provider. Drives Anthropic's own Claude Code
 /// login (`claude auth login --claudeai`) so the user never touches a terminal, and Clippy
 /// never handles subscription tokens itself.
 @Observable
