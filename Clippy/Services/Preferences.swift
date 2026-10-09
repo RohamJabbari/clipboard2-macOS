@@ -71,7 +71,7 @@ final class Preferences {
         static let contextMenuModifier = "contextMenuModifier"
         static let customPrompts = "customPrompts"
         static let hasLaunchedBefore = "hasLaunchedBefore"
-        static let hasShownAccessibilityOnboarding = "hasShownAccessibilityOnboarding"
+        static let hasShownPermissions = "hasShownPermissions"
     }
 
     /// 0 means "ask every time".
@@ -117,8 +117,8 @@ final class Preferences {
     }
     var customPrompts: [CustomPrompt] { didSet { store(customPrompts, Key.customPrompts) } }
     var hasLaunchedBefore: Bool { didSet { defaults.set(hasLaunchedBefore, forKey: Key.hasLaunchedBefore) } }
-    var hasShownAccessibilityOnboarding: Bool {
-        didSet { defaults.set(hasShownAccessibilityOnboarding, forKey: Key.hasShownAccessibilityOnboarding) }
+    var hasShownPermissions: Bool {
+        didSet { defaults.set(hasShownPermissions, forKey: Key.hasShownPermissions) }
     }
 
     init(defaults: UserDefaults) {
@@ -163,7 +163,7 @@ final class Preferences {
         contextMenuModifier = ContextMenuModifier(rawValue: defaults.string(forKey: Key.contextMenuModifier) ?? "") ?? .command
         customPrompts = Self.load([CustomPrompt].self, defaults, Key.customPrompts) ?? []
         hasLaunchedBefore = defaults.bool(forKey: Key.hasLaunchedBefore)
-        hasShownAccessibilityOnboarding = defaults.bool(forKey: Key.hasShownAccessibilityOnboarding)
+        hasShownPermissions = defaults.bool(forKey: Key.hasShownPermissions)
     }
 
     var maxAge: TimeInterval? {

@@ -76,6 +76,11 @@ final class ContextMenuController: NSObject {
             guard event.getIntegerValueField(.eventSourceUserData) != PasteService.syntheticEventMarker,
                   Self.matches(event.flags, env.prefs.contextMenuModifier)
             else { return false }
+            // Every item needs Accessibility; without it, leave the click alone and explain.
+            guard AXPermission.isTrusted else {
+                DispatchQueue.main.async { [weak self] in self?.env.showPermissions() }
+                return false
+            }
             swallowNextRightMouseUp = true
             clickLocation = event.location
             DispatchQueue.main.async { [weak self] in self?.showMenu() }
@@ -97,20 +102,27 @@ final class ContextMenuController: NSObject {
     // MARK: Menu
 
     private func showMenu() {
-        target = env.appTracker.targetApp
+        target = NSWorkspace.shared.frontmostApplication.flatMap {
+            $0.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : $0
+        } ?? env.appTracker.targetApp
         let isFinder = target?.bundleIdentifier == "com.apple.finder"
         if isFinder {
-            // A real right-click selects the item under the pointer; do the same.
+            // A real right-click selects the item under the pointer; do the same, and give the
+            // click time to land before the menu opens (otherwise it hits the menu).
             PasteService.postClick(at: clickLocation)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in self?.presentMenu(isFinder: true) }
+        } else {
+            presentMenu(isFinder: false)
         }
+    }
+
+    private func presentMenu(isFinder: Bool) {
         let menu = buildMenu(isFinder: isFinder)
         guard let primary = NSScreen.screens.first else { return }
         let point = NSPoint(x: clickLocation.x, y: primary.frame.maxY - clickLocation.y)
-        // A menu needs its app active to track the keyboard; focus goes back to the target as
-        // soon as an item runs (or right away if the menu was dismissed).
-        NSApp.activate()
+        // Don't activate Clippy: activation finishing mid-tracking closes the menu, and the
+        // right-clicked app keeps focus so keystrokes from the items reach it.
         menu.popUp(positioning: nil, at: point, in: nil)
-        if NSApp.isActive { target?.activate() }
     }
 
     private func buildMenu(isFinder: Bool) -> NSMenu {
@@ -219,9 +231,15 @@ final class ContextMenuController: NSObject {
 
     /// Gives focus back to the app that was right-clicked, then runs `work` once it's frontmost.
     private func inTarget(_ work: @escaping (ContextMenuController) -> Void) {
-        target?.activate()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+        guard AXPermission.isTrusted else {
+            env.showPermissions()
+            return
+        }
+        if let target, !target.isActive { target.activate() }
+        // Let the menu finish closing and the target settle before sending keys or clicks.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self else { return }
+            Log.app.debug("Context menu action for \(self.target?.bundleIdentifier ?? "unknown", privacy: .public)")
             work(self)
         }
     }

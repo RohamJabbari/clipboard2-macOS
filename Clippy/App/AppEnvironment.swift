@@ -33,7 +33,7 @@ final class AppEnvironment {
     let modelCatalog = AIModelCatalog()
 
     @ObservationIgnored private(set) lazy var panel = QuickPanelController(env: self)
-    @ObservationIgnored private let onboarding = AccessibilityOnboardingController()
+    @ObservationIgnored private let permissionsWindow = PermissionsWindowController()
 
     @ObservationIgnored private var maintenanceTimer: Timer?
     @ObservationIgnored private lazy var serviceProvider = ServiceProvider(env: self)
@@ -122,21 +122,22 @@ final class AppEnvironment {
             }
         }
         paste.onAccessibilityMissing = { [weak self] in
-            self?.showAccessibilityOnboarding()
+            self?.showPermissions()
         }
 
         if !prefs.hasLaunchedBefore {
             prefs.hasLaunchedBefore = true
             LoginItem.setEnabled(true)
         }
-        if !AXPermission.isTrusted && !prefs.hasShownAccessibilityOnboarding {
-            prefs.hasShownAccessibilityOnboarding = true
-            showAccessibilityOnboarding()
+        // First launch after install: walk through the permissions.
+        if !prefs.hasShownPermissions {
+            prefs.hasShownPermissions = true
+            showPermissions()
         }
     }
 
-    func showAccessibilityOnboarding() {
-        onboarding.show()
+    func showPermissions() {
+        permissionsWindow.show()
     }
 
     /// One-time: re-hash existing history with the current rules and merge duplicates.
@@ -198,7 +199,7 @@ final class AppEnvironment {
     /// menu for that text. The temporary copy is never recorded in history.
     func showSelectionActions() {
         guard AXPermission.isTrusted else {
-            showAccessibilityOnboarding()
+            showPermissions()
             return
         }
         let target = appTracker.targetApp
@@ -333,7 +334,7 @@ final class AppEnvironment {
         switch url.host() {
         case "settings": SettingsOpener.open()
         case "panel": panel.show()
-        case "accessibility": showAccessibilityOnboarding()
+        case "accessibility", "permissions": showPermissions()
         #if DEBUG
         case "stress":
             // Debug aid: drives the capture pipeline through a private pasteboard, so memory can

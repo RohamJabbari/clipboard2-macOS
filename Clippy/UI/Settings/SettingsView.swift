@@ -75,6 +75,9 @@ struct GeneralSettingsView: View {
             .onChange(of: prefs.contextMenuEnabled) { env.contextMenu.update() }
 
             Section("Capture") {
+                LabeledContent("Permissions") {
+                    Button("Review Permissions…") { env.showPermissions() }
+                }
                 Toggle("Pause clipboard capture", isOn: $prefs.isPaused)
                 LabeledContent("Auto-paste") {
                     HStack(spacing: 8) {
@@ -83,7 +86,7 @@ struct GeneralSettingsView: View {
                             .foregroundStyle(axTrusted ? AnyShapeStyle(.green) : AnyShapeStyle(.orange))
                             .labelStyle(.titleAndIcon)
                         if !axTrusted {
-                            Button("Set Up…") { env.showAccessibilityOnboarding() }
+                            Button("Set Up…") { env.showPermissions() }
                         }
                     }
                 }

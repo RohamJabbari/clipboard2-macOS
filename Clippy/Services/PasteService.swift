@@ -200,6 +200,7 @@ final class PasteService {
                   let up = CGEvent(mouseEventSource: source, mouseType: upType, mouseCursorPosition: location, mouseButton: button)
             else { return }
             for event in [down, up] {
+                event.flags = []
                 event.setIntegerValueField(.mouseEventClickState, value: Int64(click))
                 event.setIntegerValueField(.eventSourceUserData, value: syntheticEventMarker)
                 event.post(tap: .cgSessionEventTap)
