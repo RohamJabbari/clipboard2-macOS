@@ -217,3 +217,35 @@ struct ModelCatalogTests {
         #expect(AIModelCatalog.relevant(ids, for: .openRouter) == ids)
     }
 }
+
+struct APIKeyDetectorTests {
+    @Test(arguments: [
+        ("sk-ant-api03-abc", [AIProviderKind.anthropic]),
+        ("sk-or-v1-abc", [.openRouter]),
+        ("AIzaSyD-abc", [.gemini]),
+        ("gsk_abc", [.groq]),
+        ("xai-abc", [.xai]),
+        ("sk-proj-abc", [.openAI]),
+        ("sk-0123456789abcdef0123456789abcdef", [.deepSeek, .openAI]),
+        ("sk-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuv", [.openAI, .deepSeek]),
+        ("Ab3dEfGhIjKlMnOpQrStUvWxYz012345", [.mistral]),
+        ("hello world", []),
+    ])
+    func candidatesFromPrefix(key: String, expected: [AIProviderKind]) {
+        #expect(APIKeyDetector.candidates(for: "  \(key)\n") == expected)
+    }
+
+    @Test func preferredModelUsesHints() {
+        let models = ["gemini-embedding-001", "gemini-3-pro", "gemini-3-flash"]
+        #expect(AIModelLister.preferredModel(from: models, for: .gemini) == "gemini-3-flash")
+        #expect(AIModelLister.preferredModel(from: ["a", "b"], for: .custom) == "a")
+    }
+
+    @Test func everyAPIProviderBuildsAClient() throws {
+        for provider in AIProviderKind.apiProviders where provider != .anthropic {
+            let url = URL(string: provider == .custom ? "http://localhost:11434/v1" : provider.defaultBaseURL)
+            #expect(url != nil, "\(provider)")
+        }
+        #expect(!AIProviderKind.apiProviders.contains(.claudeCode))
+    }
+}

@@ -54,28 +54,43 @@ nonisolated enum AIProviderKind: String, CaseIterable, Codable, Identifiable, Se
     case claudeCode
     case anthropic
     case openAI
+    case gemini
     case deepSeek
+    case groq
+    case xai
+    case mistral
     case openRouter
     case custom
 
     var id: String { rawValue }
 
+    /// Every provider reached with an API key (everything except the Claude subscription).
+    static let apiProviders: [AIProviderKind] = allCases.filter { $0 != .claudeCode }
+
     var title: String {
         switch self {
-        case .anthropic: "Claude API key"
-        case .openAI: "OpenAI"
-        case .deepSeek: "DeepSeek"
-        case .openRouter: "OpenRouter"
-        case .custom: "OpenAI-Compatible (Custom)"
         case .claudeCode: "Claude — sign in with your account"
+        case .anthropic: "Anthropic (Claude)"
+        case .openAI: "OpenAI (GPT)"
+        case .gemini: "Google Gemini"
+        case .deepSeek: "DeepSeek"
+        case .groq: "Groq"
+        case .xai: "xAI (Grok)"
+        case .mistral: "Mistral"
+        case .openRouter: "OpenRouter"
+        case .custom: "Custom endpoint (OpenAI-compatible)"
         }
     }
 
     var shortName: String {
         switch self {
         case .anthropic, .claudeCode: "Claude"
-        case .openAI: "OpenAI"
+        case .openAI: "GPT"
+        case .gemini: "Gemini"
         case .deepSeek: "DeepSeek"
+        case .groq: "Groq"
+        case .xai: "Grok"
+        case .mistral: "Mistral"
         case .openRouter: "OpenRouter"
         case .custom: "AI"
         }
@@ -85,29 +100,45 @@ nonisolated enum AIProviderKind: String, CaseIterable, Codable, Identifiable, Se
         switch self {
         case .anthropic: "https://api.anthropic.com/v1"
         case .openAI: "https://api.openai.com/v1"
+        case .gemini: "https://generativelanguage.googleapis.com/v1beta/openai"
         case .deepSeek: "https://api.deepseek.com"
+        case .groq: "https://api.groq.com/openai/v1"
+        case .xai: "https://api.x.ai/v1"
+        case .mistral: "https://api.mistral.ai/v1"
         case .openRouter: "https://openrouter.ai/api/v1"
         case .custom: "http://localhost:11434/v1"
         case .claudeCode: ""
         }
     }
 
+    /// Empty means "pick from the provider's live model list".
     var defaultModel: String {
         switch self {
         case .anthropic: "claude-sonnet-5-5"
         case .openAI: "gpt-5.6"
         case .deepSeek: "deepseek-flash"
         case .openRouter: "openrouter/auto"
-        case .custom: ""
         case .claudeCode: "sonnet"
+        case .gemini, .groq, .xai, .mistral, .custom: ""
+        }
+    }
+
+    /// Substrings preferred when picking a default from a fetched model list.
+    var preferredModelHints: [String] {
+        switch self {
+        case .gemini: ["flash", "pro"]
+        case .groq: ["llama", "qwen"]
+        case .xai: ["grok"]
+        case .mistral: ["mistral-medium-latest", "mistral-small-latest", "latest"]
+        default: []
         }
     }
 
     /// Custom endpoints (Ollama, LM Studio, …) often run without a key.
     var requiresAPIKey: Bool {
         switch self {
-        case .anthropic, .openAI, .deepSeek, .openRouter: true
         case .custom, .claudeCode: false
+        default: true
         }
     }
 
@@ -118,17 +149,39 @@ nonisolated enum AIProviderKind: String, CaseIterable, Codable, Identifiable, Se
         self == .anthropic ? "api-key" : "api-key-\(rawValue)"
     }
 
-    var keyPlaceholder: String {
-        switch self {
-        case .anthropic: "sk-ant-…"
-        case .openAI, .deepSeek: "sk-…"
-        case .openRouter: "sk-or-…"
-        case .custom: "Optional"
-        case .claudeCode: ""
+    var apiKey: String? { Keychain.read(account: keychainAccount) }
+}
+
+/// Works out which provider an API key belongs to: prefix first, then a live check.
+nonisolated enum APIKeyDetector {
+    /// Providers to try, most likely first. Empty means the key format is unknown.
+    static func candidates(for rawKey: String) -> [AIProviderKind] {
+        let key = rawKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if key.hasPrefix("sk-ant-") { return [.anthropic] }
+        if key.hasPrefix("sk-or-") { return [.openRouter] }
+        if key.hasPrefix("AIza") { return [.gemini] }
+        if key.hasPrefix("gsk_") { return [.groq] }
+        if key.hasPrefix("xai-") { return [.xai] }
+        if key.hasPrefix("sk-proj-") || key.hasPrefix("sk-svcacct-") || key.hasPrefix("sk-admin-") { return [.openAI] }
+        if key.hasPrefix("sk-") {
+            // DeepSeek keys are "sk-" + 32 hex characters; OpenAI's legacy keys are longer.
+            let body = key.dropFirst(3)
+            let isHex32 = body.count == 32 && body.allSatisfy(\.isHexDigit)
+            return isHex32 ? [.deepSeek, .openAI] : [.openAI, .deepSeek]
         }
+        if key.count == 32, key.allSatisfy({ $0.isLetter || $0.isNumber }) { return [.mistral] }
+        return []
     }
 
-    var apiKey: String? { Keychain.read(account: keychainAccount) }
+    /// Returns the first candidate whose `/models` endpoint accepts the key.
+    static func identify(_ key: String) async -> AIProviderKind? {
+        for provider in candidates(for: key) {
+            if (try? await AIModelLister.fetch(provider: provider, customBaseURL: "", apiKey: key)) != nil {
+                return provider
+            }
+        }
+        return nil
+    }
 }
 
 // MARK: - Actions
@@ -221,7 +274,7 @@ nonisolated enum AIError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .missingAPIKey(let provider): "Add your \(provider.shortName) API key in Settings → AI."
+        case .missingAPIKey(let provider): "Add your \(provider.title) API key in Settings → AI."
         case .missingModel: "Choose a model in Settings → AI."
         case .badURL: "The base URL in Settings → AI isn't valid."
         case .http(let status, let message): "Request failed (\(status)): \(message)"
@@ -596,7 +649,7 @@ nonisolated enum AIClientFactory {
         switch provider {
         case .anthropic:
             return ClaudeClient(apiKey: key ?? "", model: model)
-        case .openAI, .deepSeek:
+        case .openAI, .gemini, .deepSeek, .groq, .xai, .mistral:
             return OpenAICompatibleClient(baseURL: provider.defaultBaseURL, apiKey: key, model: model)
         case .openRouter:
             return OpenAICompatibleClient(baseURL: provider.defaultBaseURL, apiKey: key, model: model,
@@ -611,14 +664,15 @@ nonisolated enum AIClientFactory {
 
 /// Lists models from the provider's `/models` endpoint so IDs never go stale in the app.
 nonisolated enum AIModelLister {
-    static func fetch(provider: AIProviderKind, customBaseURL: String) async throws -> [String] {
+    /// `apiKey` overrides the stored key (used while detecting a freshly pasted key).
+    static func fetch(provider: AIProviderKind, customBaseURL: String, apiKey: String? = nil) async throws -> [String] {
         if provider == .claudeCode { return ["sonnet", "opus", "haiku"] }
         let base = (provider == .custom ? customBaseURL : provider.defaultBaseURL)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
         guard let url = URL(string: base + "/models") else { throw AIError.badURL }
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
-        let key = provider.apiKey
+        let key = apiKey ?? provider.apiKey
         if provider.requiresAPIKey, key == nil { throw AIError.missingAPIKey(provider) }
         if provider == .anthropic {
             request.setValue(key, forHTTPHeaderField: "x-api-key")
@@ -633,7 +687,16 @@ nonisolated enum AIModelLister {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let items = json["data"] as? [[String: Any]]
         else { throw AIError.invalidResponse }
-        return items.compactMap { $0["id"] as? String }.sorted()
+        // Gemini's OpenAI-compatible endpoint prefixes ids with "models/".
+        return items.compactMap { ($0["id"] as? String).map { $0.replacingOccurrences(of: "models/", with: "") } }.sorted()
+    }
+
+    /// A sensible default when the provider has no fixed default model.
+    static func preferredModel(from models: [String], for provider: AIProviderKind) -> String? {
+        for hint in provider.preferredModelHints {
+            if let match = models.first(where: { $0.contains(hint) }) { return match }
+        }
+        return models.first
     }
 }
 

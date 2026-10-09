@@ -165,105 +165,62 @@ struct AISettingsView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var keyInput = ""
     @State private var hasKey = false
+    @State private var replacingKey = false
+    @State private var detecting = false
+    @State private var detectError: String?
     @State private var testState: TestState = .idle
-    @State private var models: [String] = []
-    @State private var modelsError: String?
-    @State private var loadingModels = false
 
     enum TestState: Equatable {
         case idle, running, ok, failed(String)
     }
+
+    private enum Mode: Hashable { case subscription, apiKey }
 
     var body: some View {
         @Bindable var prefs = env.prefs
         let provider = prefs.aiProvider
         Form {
             Section {
-                Picker("Provider", selection: $prefs.aiProvider) {
-                    Text(AIProviderKind.claudeCode.title).tag(AIProviderKind.claudeCode)
-                    Divider()
-                    ForEach(AIProviderKind.allCases.filter { $0 != .claudeCode }) { Text($0.title).tag($0) }
+                Picker("Use", selection: modeBinding) {
+                    Text("Claude — sign in with your account").tag(Mode.subscription)
+                    Text("API key — any provider").tag(Mode.apiKey)
                 }
+                .pickerStyle(.radioGroup)
+
                 if provider == .claudeCode {
                     ClaudeAccountRow(account: env.claudeAccount)
-                } else if provider == .anthropic && !hasKey {
-                    LabeledContent("Have Claude Pro or Max?") {
-                        Button("Use My Claude Subscription") {
-                            prefs.aiProvider = .claudeCode
-                            if !env.claudeAccount.isSignedIn { env.claudeAccount.signIn() }
+                } else {
+                    apiKeyRows(provider: provider)
+                }
+
+                if provider != .claudeCode || env.claudeAccount.isSignedIn {
+                    LabeledContent("Model") {
+                        HStack {
+                            TextField("Model", text: $prefs.aiModel, prompt: Text("model-id"))
+                                .labelsHidden()
+                                .multilineTextAlignment(.trailing)
+                                .frame(minWidth: 220)
+                            ModelPickerMenu()
                         }
                     }
-                }
-                if provider.hasEditableBaseURL {
-                    TextField("Base URL", text: $prefs.customBaseURL, prompt: Text("http://localhost:11434/v1"))
-                        .frame(minWidth: 300)
-                }
-                if provider.usesAPIKey {
-                    if hasKey {
-                        LabeledContent("API key") {
-                            HStack {
-                                Label("Stored in Keychain", systemImage: "key.fill")
-                                    .foregroundStyle(.secondary)
-                                Button("Remove", role: .destructive) {
-                                    Keychain.delete(account: provider.keychainAccount)
-                                    refreshKeyState()
-                                }
-                            }
-                        }
-                    } else {
-                        LabeledContent("API key") {
-                            HStack {
-                                SecureField("API key", text: $keyInput, prompt: Text(provider.keyPlaceholder))
-                                    .labelsHidden()
-                                    .frame(minWidth: 300)
-                                    .onSubmit { saveKey(for: provider) }
-                                Button("Save") { saveKey(for: provider) }
-                                    .disabled(keyInput.trimmingCharacters(in: .whitespaces).isEmpty)
-                            }
-                        }
-                    }
-                }
-                LabeledContent("Model") {
                     HStack {
-                        TextField("Model", text: $prefs.aiModel, prompt: Text(provider.defaultModel.isEmpty ? "model-id" : provider.defaultModel))
-                            .labelsHidden()
-                            .multilineTextAlignment(.trailing)
-                            .frame(minWidth: 220)
-                        Menu {
-                            if models.isEmpty {
-                                Text(modelsError ?? "No models loaded")
-                            }
-                            ForEach(models, id: \.self) { model in
-                                Button(model) { prefs.aiModel = model }
-                            }
-                            Divider()
-                            Button("Fetch Models") { fetchModels() }
-                        } label: {
-                            if loadingModels { ProgressView().controlSize(.small) } else { Image(systemName: "list.bullet") }
+                        Button("Test Connection") { test() }
+                            .disabled(testState == .running || (provider.requiresAPIKey && !hasKey))
+                        switch testState {
+                        case .idle: EmptyView()
+                        case .running: ProgressView().controlSize(.small)
+                        case .ok: Label("Connected", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                        case .failed(let message):
+                            Label(message, systemImage: "xmark.octagon.fill")
+                                .foregroundStyle(.red)
+                                .lineLimit(3)
                         }
-                        .menuStyle(.borderlessButton)
-                        .fixedSize()
-                        .help("Fetch the provider's current models")
-                        .accessibilityLabel("Choose a model")
-                    }
-                }
-                HStack {
-                    Button("Test Connection") { test() }
-                        .disabled(testState == .running || (provider.requiresAPIKey && !hasKey))
-                    switch testState {
-                    case .idle: EmptyView()
-                    case .running: ProgressView().controlSize(.small)
-                    case .ok: Label("Connected", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                    case .failed(let message):
-                        Label(message, systemImage: "xmark.octagon.fill")
-                            .foregroundStyle(.red)
-                            .lineLimit(3)
                     }
                 }
             } header: {
-                Text("Provider")
+                Text("AI")
             } footer: {
-                Text("Keys are stored in the macOS Keychain. Text is sent to the provider only when you run an action with ⌘K. OpenRouter gives you Gemini, Llama, Mistral and more with one key; “OpenAI-Compatible” works with Ollama, LM Studio, Groq and similar.")
+                Text("Keys are stored in the macOS Keychain. Text is only sent when you run an action with ⌘K or ⌥⌘K.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -305,38 +262,149 @@ struct AISettingsView: View {
         .onAppear { refreshKeyState() }
         .onChange(of: prefs.aiProvider) {
             refreshKeyState()
-            models = []
-            modelsError = nil
             testState = .idle
         }
     }
 
+    // MARK: API key rows
+
+    @ViewBuilder
+    private func apiKeyRows(provider: AIProviderKind) -> some View {
+        @Bindable var prefs = env.prefs
+        if hasKey && !replacingKey {
+            LabeledContent("Provider") {
+                Menu(provider.title) {
+                    ForEach(AIProviderKind.apiProviders) { option in
+                        Button(option.title) { prefs.aiProvider = option }
+                    }
+                }
+                .fixedSize()
+            }
+            LabeledContent("API key") {
+                HStack {
+                    Label("Stored in Keychain", systemImage: "key.fill").foregroundStyle(.secondary)
+                    Button("Use Another Key…") {
+                        keyInput = ""
+                        detectError = nil
+                        replacingKey = true
+                    }
+                    Button("Remove", role: .destructive) {
+                        Keychain.delete(account: provider.keychainAccount)
+                        refreshKeyState()
+                    }
+                }
+            }
+        } else {
+            LabeledContent("API key") {
+                HStack {
+                    SecureField("API key", text: $keyInput, prompt: Text("Paste a key from any provider"))
+                        .labelsHidden()
+                        .frame(minWidth: 300)
+                        .onSubmit { connect() }
+                    if detecting {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button("Connect") { connect() }
+                            .disabled(keyInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                    if replacingKey {
+                        Button("Cancel") { replacingKey = false }
+                    }
+                }
+            }
+            if let detectError {
+                LabeledContent("Provider") {
+                    HStack {
+                        Text(detectError).foregroundStyle(.orange).lineLimit(2)
+                        Menu("Choose…") {
+                            ForEach(AIProviderKind.apiProviders) { option in
+                                Button(option.title) { save(keyInput, as: option) }
+                            }
+                        }
+                        .fixedSize()
+                    }
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Works with Anthropic, OpenAI, Google Gemini, DeepSeek, Groq, xAI, Mistral and OpenRouter — the provider is detected from the key.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if provider != .custom {
+                        Button("Local or custom server…") { prefs.aiProvider = .custom }
+                            .controlSize(.small)
+                            .help("Ollama, LM Studio or any OpenAI-compatible endpoint; a key is optional")
+                    }
+                }
+            }
+        }
+        if provider.hasEditableBaseURL {
+            TextField("Base URL", text: $prefs.customBaseURL, prompt: Text("http://localhost:11434/v1"))
+                .frame(minWidth: 300)
+        }
+    }
+
+    private var modeBinding: Binding<Mode> {
+        Binding(
+            get: { env.prefs.aiProvider == .claudeCode ? .subscription : .apiKey },
+            set: { mode in
+                switch mode {
+                case .subscription:
+                    env.prefs.aiProvider = .claudeCode
+                case .apiKey:
+                    // Prefer a provider that already has a key stored.
+                    env.prefs.aiProvider = AIProviderKind.apiProviders.first { $0.apiKey != nil } ?? .anthropic
+                }
+            }
+        )
+    }
+
+    // MARK: Actions
+
     private func refreshKeyState() {
-        hasKey = env.prefs.aiProvider.apiKey != nil
+        let provider = env.prefs.aiProvider
+        hasKey = provider.usesAPIKey && provider.apiKey != nil
+        replacingKey = false
+        detectError = nil
         keyInput = ""
     }
 
-    private func saveKey(for provider: AIProviderKind) {
+    /// Detects the provider from the pasted key, verifies it, stores it and picks a model.
+    private func connect() {
         let key = keyInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { return }
-        Keychain.save(key, account: provider.keychainAccount, label: "Clippy – \(provider.title) API key")
-        refreshKeyState()
+        detecting = true
+        detectError = nil
+        Task {
+            let provider = await APIKeyDetector.identify(key)
+            detecting = false
+            if let provider {
+                save(key, as: provider)
+            } else {
+                detectError = APIKeyDetector.candidates(for: key).isEmpty
+                    ? "Couldn't tell which provider this key is for."
+                    : "The key was rejected. Check it, or pick the provider:"
+            }
+        }
     }
 
-    private func fetchModels() {
-        let provider = env.prefs.aiProvider
-        let base = env.prefs.customBaseURL
-        loadingModels = true
-        Task {
-            do {
-                models = try await AIModelLister.fetch(provider: provider, customBaseURL: base)
-                modelsError = models.isEmpty ? "The provider returned no models" : nil
-            } catch {
-                models = []
-                modelsError = error.localizedDescription
+    private func save(_ rawKey: String, as provider: AIProviderKind) {
+        let key = rawKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        Keychain.save(key, account: provider.keychainAccount, label: "Clippy – \(provider.title) API key")
+        let prefs = env.prefs
+        prefs.aiProvider = provider
+        if prefs.aiModels[provider.rawValue] == nil {
+            if !provider.defaultModel.isEmpty {
+                prefs.aiModel = provider.defaultModel
+            } else {
+                Task {
+                    let models = (try? await AIModelLister.fetch(provider: provider, customBaseURL: prefs.customBaseURL)) ?? []
+                    if let pick = AIModelLister.preferredModel(from: models, for: provider) { prefs.aiModel = pick }
+                }
             }
-            loadingModels = false
         }
+        env.modelCatalog.reload(provider, customBaseURL: prefs.customBaseURL)
+        refreshKeyState()
     }
 
     private func test() {
