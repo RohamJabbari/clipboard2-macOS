@@ -31,6 +31,7 @@ final class AppEnvironment {
     let slots: QuickSlots
     let claudeAccount = SubscriptionAccount(cli: .claude)
     let chatGPTAccount = SubscriptionAccount(cli: .codex)
+    let updates = UpdateController()
     let modelCatalog = AIModelCatalog()
 
     @ObservationIgnored private(set) lazy var panel = QuickPanelController(env: self)
@@ -74,6 +75,7 @@ final class AppEnvironment {
     // MARK: Lifecycle
 
     func start() {
+        updates.start()
         monitor.shouldDiscard = { [weak self] capture in
             guard let self, capture.kind.isTextual else { return false }
             return self.secrets.valueHashes.contains(capture.hash)

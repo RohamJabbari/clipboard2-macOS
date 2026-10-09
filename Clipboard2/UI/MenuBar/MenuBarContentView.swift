@@ -63,6 +63,20 @@ struct MenuBarContentView: View {
 
             Divider()
 
+            if let version = env.updates.availableVersion {
+                Button {
+                    dismiss()
+                    env.updates.checkForUpdates()
+                } label: {
+                    Label("Clipboard2 \(version) is available — Install", systemImage: "arrow.down.circle.fill")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.borderless)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                Divider()
+            }
+
             if results.isEmpty {
                 ContentUnavailableView {
                     Label(search.isEmpty ? "No Clipboard History" : "No Results", systemImage: search.isEmpty ? "list.clipboard" : "magnifyingglass")

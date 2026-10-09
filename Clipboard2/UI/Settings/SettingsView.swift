@@ -332,6 +332,43 @@ struct SyncSettingsView: View {
 
 // MARK: - About
 
+struct UpdatesSection: View {
+    @Environment(AppEnvironment.self) private var env
+    @State private var autoCheck = true
+    @State private var autoInstall = false
+
+    var body: some View {
+        Section {
+            Toggle("Check for updates every hour", isOn: $autoCheck)
+                .onChange(of: autoCheck) { env.updates.automaticallyChecks = autoCheck }
+            Toggle("Install updates automatically", isOn: $autoInstall)
+                .onChange(of: autoInstall) { env.updates.automaticallyInstalls = autoInstall }
+                .disabled(!autoCheck)
+            LabeledContent("Last checked") {
+                Text(env.updates.lastCheck.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "Never")
+            }
+            HStack {
+                if let version = env.updates.availableVersion {
+                    Label("Version \(version) is available", systemImage: "arrow.down.circle.fill")
+                        .foregroundStyle(.tint)
+                }
+                Spacer()
+                Button("Check for Updates…") { env.updates.checkForUpdates() }
+            }
+        } header: {
+            Text("Updates")
+        } footer: {
+            Text("Updates come from GitHub, are verified with your Developer ID signature, and install in place — Clipboard2 relaunches with your data intact.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .onAppear {
+            autoCheck = env.updates.automaticallyChecks
+            autoInstall = env.updates.automaticallyInstalls
+        }
+    }
+}
+
 struct AboutSettingsView: View {
     private var version: String {
         let info = Bundle.main.infoDictionary
@@ -356,6 +393,7 @@ struct AboutSettingsView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
             }
+            UpdatesSection()
             Section("Data") {
                 LabeledContent("Location") {
                     Text(AppPaths.supportDirectory.path(percentEncoded: false))

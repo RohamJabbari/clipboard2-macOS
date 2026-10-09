@@ -35,6 +35,18 @@ xcodebuild -project "$APP_NAME.xcodeproj" -scheme "$APP_NAME" -configuration Rel
     -derivedDataPath "$DERIVED" -destination 'platform=macOS' build -quiet ${SIGN_ARGS[@]+"${SIGN_ARGS[@]}"}
 APP="$DERIVED/Build/Products/Release/$APP_NAME.app"
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")
+
+# Sparkle's helper tools must carry our Developer ID, hardened runtime and a timestamp to pass
+# notarization; re-sign them inside-out, then the app (keeping its entitlements).
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+if [[ -n "$APP_ID" && -d "$SPARKLE" ]]; then
+    echo "  re-signing Sparkle helpers"
+    for item in "$SPARKLE/Versions/B/XPCServices/Installer.xpc" "$SPARKLE/Versions/B/XPCServices/Downloader.xpc" \
+                "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app" "$SPARKLE"; do
+        [[ -e "$item" ]] && codesign -f -s "$APP_ID" -o runtime --timestamp --preserve-metadata=entitlements "$item" 2>/dev/null
+    done
+    codesign -f -s "$APP_ID" -o runtime --timestamp --preserve-metadata=entitlements,requirements,flags "$APP"
+fi
 codesign --verify --strict --deep "$APP"
 
 can_notarize() { [[ -n "$APP_ID" ]] && xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; }

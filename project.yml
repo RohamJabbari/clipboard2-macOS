@@ -25,6 +25,9 @@ packages:
   KeyboardShortcuts:
     url: https://github.com/sindresorhus/KeyboardShortcuts
     from: "2.0.0"
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.9.0"
 
 targets:
   Clipboard2:
@@ -46,6 +49,14 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: at.softmaze.Clippy
             CFBundleURLSchemes: [clipboard2, clippy]
+        # Sparkle: hourly update checks against the appcast in the GitHub repo.
+        SUFeedURL: https://raw.githubusercontent.com/RohamJabbari/clipboard2-macOS/main/appcast.xml
+        SUPublicEDKey: EYXl4+z6FlFfMyGuKf4+WHXcB3c8WHA6ThmEj4pPwwI=
+        SUEnableAutomaticChecks: true
+        SUScheduledCheckInterval: 3600
+        SUAllowsAutomaticUpdates: true
+        SUAutomaticallyUpdate: false
+        SUVerifyUpdateBeforeExtraction: true
         NSServices:
           - NSMenuItem:
               default: Clipboard2 Actions…
@@ -78,6 +89,7 @@ targets:
           CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
     dependencies:
       - package: KeyboardShortcuts
+      - package: Sparkle
 
   Clipboard2Tests:
     type: bundle.unit-test

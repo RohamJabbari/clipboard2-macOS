@@ -5,7 +5,7 @@ DERIVED    := build
 RELEASE_APP := $(DERIVED)/Build/Products/Release/$(APP_NAME).app
 INSTALL_DIR := /Applications
 
-.PHONY: all generate build debug test install run icon pkg clean
+.PHONY: all generate build debug test install run icon pkg release clean
 
 # Sign with Developer ID when that certificate exists, so local installs and the .pkg share one
 # signature (Accessibility/Keychain grants are tied to it). Otherwise Apple Development.
@@ -45,6 +45,11 @@ run: install
 
 pkg:
 	scripts/make-pkg.sh
+
+# make release VERSION=1.2.0 — build, notarize, publish on GitHub; installed apps update in place.
+release:
+	@test -n "$(VERSION)" || (echo "usage: make release VERSION=x.y.z" && exit 1)
+	scripts/release.sh $(VERSION)
 
 icon:
 	swift scripts/make-icon.swift Clipboard2/Resources/Assets.xcassets/AppIcon.appiconset

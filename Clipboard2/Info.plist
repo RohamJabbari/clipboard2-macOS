@@ -79,5 +79,19 @@
 			</array>
 		</dict>
 	</array>
+	<key>SUAllowsAutomaticUpdates</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://raw.githubusercontent.com/RohamJabbari/clipboard2-macOS/main/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>EYXl4+z6FlFfMyGuKf4+WHXcB3c8WHA6ThmEj4pPwwI=</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>3600</integer>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
 </dict>
 </plist>
